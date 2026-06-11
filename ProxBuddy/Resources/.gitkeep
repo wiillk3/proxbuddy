@@ -1,0 +1,2 @@
+Place the cross-compiled pm3client binary here.
+Run build_pm3_ios.sh from the repo root to generate it.

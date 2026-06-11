@@ -1,0 +1,89 @@
+name: ProxBuddy
+
+options:
+  bundleIdPrefix: rfid.spot
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  xcodeVersion: "26.0"
+  generateEmptyDirectories: true
+
+settings:
+  SWIFT_VERSION: "6.0"
+  SWIFT_STRICT_CONCURRENCY: complete
+  ENABLE_USER_SCRIPT_SANDBOXING: NO
+  DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+
+targets:
+  ProxBuddy:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    bundleId: rfid.spot.proxbuddy
+
+    sources:
+      - path: ProxBuddy
+        excludes:
+          - "Resources/pm3client"
+          - "Resources/libpm3client.dylib"
+          - "Resources/.gitkeep"
+          - "Info.plist"
+          - "ProxBuddy.entitlements"
+          - "AI"
+          - "Resources/luascripts"
+          - "Resources/pyscripts"
+          - "Resources/cmdscripts"
+          - "Resources/lualibs"
+          - "Resources/dictionaries"
+        type: group
+      - path: ProxBuddy/Resources/luascripts
+        type: folder
+      - path: ProxBuddy/Resources/pyscripts
+        type: folder
+      - path: ProxBuddy/Resources/cmdscripts
+        type: folder
+      - path: ProxBuddy/Resources/lualibs
+        type: folder
+      - path: ProxBuddy/Resources/dictionaries
+        type: folder
+
+    resources:
+      - path: ProxBuddy/Resources/python311.zip
+
+    info:
+      path: ProxBuddy/Info.plist
+      properties:
+        UILaunchScreen:
+          UIColorName: White
+
+    entitlements:
+      path: ProxBuddy/ProxBuddy.entitlements
+
+    settings:
+      DEVELOPMENT_TEAM: ""            # fill in your Team ID
+      CODE_SIGN_IDENTITY: "iPhone Developer"
+      PROVISIONING_PROFILE_SPECIFIER: ""
+      PRODUCT_BUNDLE_IDENTIFIER: rfid.spot.proxbuddy
+      INFOPLIST_FILE: ProxBuddy/Info.plist
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+    dependencies:
+      - framework: ProxBuddy/Resources/libpm3client.dylib
+        embed: true
+        link: false
+      - framework: ProxBuddy/Python.xcframework
+        embed: true
+        link: true
+
+  ProxBuddyTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: ProxBuddyTests
+    dependencies:
+      - target: ProxBuddy
+    settings:
+      SWIFT_VERSION: "6.0"
+      SWIFT_STRICT_CONCURRENCY: complete
+      PRODUCT_BUNDLE_IDENTIFIER: rfid.spot.proxbuddy.tests
