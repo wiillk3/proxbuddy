@@ -1,16 +1,33 @@
 import Foundation
 
-/// One connected Proxmark3 — bundles runner, engine, and transport together.
+enum TransportMode: Hashable, Identifiable {
+    case ble
+    case wifiDirect(host: String, port: UInt16)
+    case bridge
+
+    var id: String {
+        switch self {
+        case .ble: return "ble"
+        case .wifiDirect(let h, let p): return "wifi-\(h):\(p)"
+        case .bridge: return "bridge"
+        }
+    }
+}
+
+/// One connected Proxmark — bundles runner, engine, and active transport together.
 @MainActor
 final class PM3Session: ObservableObject, Identifiable {
     let id = UUID()
     @Published var label: String
+    @Published var selectedTransportMode: TransportMode = .ble
 
     let runner = BinaryRunner()
     let engine = TerminalEngine()
 
     #if !targetEnvironment(simulator)
-    let transport = TcpTransport()
+    let bleTransport = BLETransport()
+    let tcpTransport = TcpTransport()
+    var transport: TcpTransport { tcpTransport }
     #endif
 
     init(label: String) { self.label = label }
@@ -20,10 +37,29 @@ final class PM3Session: ObservableObject, Identifiable {
     var isRunning: Bool { runner.isRunning }
 
     #if !targetEnvironment(simulator)
-    var statusMessage: String { transport.statusMessage }
-    var isTransportReady: Bool { true }   // port pair created internally; always launchable
+    var statusMessage: String {
+        switch selectedTransportMode {
+        case .ble:
+            if let name = bleTransport.connectedPeripheralName {
+                return "BLE: \(name) (\(bleTransport.connectionState.rawValue))"
+            }
+            return "BLE: \(bleTransport.connectionState.rawValue)"
+        case .wifiDirect, .bridge:
+            return tcpTransport.statusMessage
+        }
+    }
+
+    var batteryLevel: Int? {
+        if case .ble = selectedTransportMode {
+            return bleTransport.batteryLevel
+        }
+        return nil
+    }
+
+    var isTransportReady: Bool { true }
     #else
     var statusMessage: String { runner.isRunning ? "USB direct (sim)" : "Stopped" }
+    var batteryLevel: Int? { nil }
     var isTransportReady: Bool { true }
     #endif
 
@@ -55,9 +91,18 @@ final class PM3Session: ObservableObject, Identifiable {
             engine.append(raw: "[!] boot: launch failed — \(error.localizedDescription)", isInput: false)
             return
         }
-        // Attach transport relay to the port pair BinaryRunner created
+        // Attach active transport relay to the port pair BinaryRunner created
         if runner.portMasterFD >= 0 {
-            transport.attach(portFD: runner.portMasterFD)
+            switch selectedTransportMode {
+            case .ble:
+                bleTransport.attach(portFD: runner.portMasterFD)
+            case .wifiDirect(let host, let port):
+                tcpTransport.connect(host: host, port: port)
+                tcpTransport.attach(portFD: runner.portMasterFD)
+            case .bridge:
+                tcpTransport.startBrowsing()
+                tcpTransport.attach(portFD: runner.portMasterFD)
+            }
         }
         Task { await engine.connect(to: runner) }
         #endif
@@ -69,5 +114,11 @@ final class PM3Session: ObservableObject, Identifiable {
         await boot(scanHistory: scanHistory)
     }
 
-    func terminate() { runner.terminate() }
+    func terminate() {
+        runner.terminate()
+        #if !targetEnvironment(simulator)
+        bleTransport.disconnect()
+        tcpTransport.disconnect()
+        #endif
+    }
 }

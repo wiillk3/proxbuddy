@@ -1,8 +1,7 @@
 import Foundation
 
 // libpm3 C ABI
-typealias PM3InitFunc        = @convention(c) () -> Void
-typealias PM3PrefsLoadFunc   = @convention(c) () -> Int32
+typealias PM3OpenFunc        = @convention(c) (UnsafePointer<CChar>?) -> OpaquePointer?
 typealias PM3ConsoleFunc     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, Bool, Bool) -> Int32
 typealias PM3CloseFunc       = @convention(c) (OpaquePointer?) -> Void
 
@@ -111,8 +110,13 @@ final class BinaryRunner: ObservableObject {
     private func launchWithPortPair(binaryPath: String) async throws {
         await reapOrphan()
 
+        let pm3Home = PM3HomeSetup.prepare(binaryPath: binaryPath)
+
+        guard let handle = dlopen(binaryPath, RTLD_NOW | RTLD_GLOBAL) else {
+            let err = String(cString: dlerror())
+            throw RunnerError.dlopenFailed(err)
+        }
         let (stdoutMaster, stdoutSlave, stdoutIsPTY)  = try Self.openPair()
-        let (portMaster,  portSlave,   _)             = try Self.openPair()
 
         if stdoutIsPTY {
             var outTios = termios()
@@ -122,30 +126,59 @@ final class BinaryRunner: ObservableObject {
             tcsetattr(stdoutMaster, TCSANOW, &outTios)
         }
 
-        let pm3Home = PM3HomeSetup.prepare(binaryPath: binaryPath)
-
-        guard let handle = dlopen(binaryPath, RTLD_NOW | RTLD_GLOBAL) else {
-            let err = String(cString: dlerror())
-            close(stdoutMaster); close(portMaster); close(stdoutSlave); close(portSlave)
-            throw RunnerError.dlopenFailed(err)
+        // Create a local TCP loopback server to bypass iOS /dev/fd/ sandbox restrictions.
+        // C client will connect to "tcp:127.0.0.1:<port>", giving us a secure, sandboxed socket.
+        let serverFD = socket(AF_INET, SOCK_STREAM, 0)
+        guard serverFD >= 0 else {
+            close(stdoutMaster); close(stdoutSlave)
+            throw RunnerError.pipeFailed
         }
-        guard let initSym    = dlsym(handle, "pm3_init"),
-              let prefsSym   = dlsym(handle, "preferences_load"),
+        var opt: Int32 = 1
+        setsockopt(serverFD, SOL_SOCKET, SO_REUSEADDR, &opt, socklen_t(MemoryLayout<Int32>.size))
+
+        var addr = sockaddr_in()
+        addr.sin_len = __uint8_t(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = UInt16(0).bigEndian // Random free port
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+
+        var bindAddr = sockaddr()
+        memcpy(&bindAddr, &addr, MemoryLayout<sockaddr_in>.size)
+
+        guard Darwin.bind(serverFD, &bindAddr, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0 else {
+            close(stdoutMaster); close(stdoutSlave); close(serverFD)
+            throw RunnerError.pipeFailed
+        }
+        guard Darwin.listen(serverFD, 1) == 0 else {
+            close(stdoutMaster); close(stdoutSlave); close(serverFD)
+            throw RunnerError.pipeFailed
+        }
+
+        // Get the dynamically allocated port
+        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+        var sin = sockaddr_in()
+        withUnsafeMutablePointer(to: &sin) { sinPtr in
+            sinPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                _ = getsockname(serverFD, sockaddrPtr, &len)
+            }
+        }
+        let localPort = UInt16(bigEndian: sin.sin_port)
+        let connectionString = "tcp:127.0.0.1:\(localPort)"
+
+        guard let openSym    = dlsym(handle, "pm3_open"),
               let consoleSym = dlsym(handle, "pm3_console"),
               let closeSym   = dlsym(handle, "pm3_close") else {
             let err = String(cString: dlerror())
             dlclose(handle)
-            close(stdoutMaster); close(portMaster); close(stdoutSlave); close(portSlave)
+            close(stdoutMaster); close(stdoutSlave); close(serverFD)
             throw RunnerError.dlsymFailed(err)
         }
-        let pm3Init    = unsafeBitCast(initSym,    to: PM3InitFunc.self)
-        let prefsLoad  = unsafeBitCast(prefsSym,   to: PM3PrefsLoadFunc.self)
+        let pm3Open    = unsafeBitCast(openSym,    to: PM3OpenFunc.self)
         let pm3Console = unsafeBitCast(consoleSym, to: PM3ConsoleFunc.self)
         let pm3Close   = unsafeBitCast(closeSym,   to: PM3CloseFunc.self)
 
         let savedStdout = dup(STDOUT_FILENO)
 
-        self.portMasterFD  = portMaster
         self.stdoutReadFD  = stdoutMaster
         self.isRunning     = true
         self.processStatus = "Running (libpm3)"
@@ -157,12 +190,9 @@ final class BinaryRunner: ObservableObject {
         // and we don't want them appearing inside the app's terminal UI!
         dup2(stdoutSlave, STDOUT_FILENO)
         close(stdoutSlave)
-        // portSlave kept around at fd 9 for forward compat once a bridge exists,
-        // but pm3_open(NULL) means it isn't actively used right now.
-        dup2(portSlave, 9)
-        close(portSlave)
 
-        setenv("HOME", NSHomeDirectory(), 1)
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        setenv("HOME", docs.path, 1)
         setenv("TERM", "xterm-256color", 1)
         setenv("PM3HOME", pm3Home, 1)
 
@@ -171,45 +201,70 @@ final class BinaryRunner: ObservableObject {
         let cmdSema     = self.cmdSema
         let shouldQuit  = self.shouldQuit
 
-        let thread = Thread { [weak self] in
-            // pm3_open(NULL) crashes inside OpenProxmark — it always tries to print
-            // and uart_open() the port string without a NULL check. Instead just do
-            // the minimum init that pm3_open would have done before OpenProxmark:
-            // pm3_init() sets up g_session globals, preferences_load() loads prefs.
-            // g_session.pm3_present stays false → pure OFFLINE mode, no hardware needed.
-            pm3Init()
-            _ = prefsLoad()
-
-            // Print the initial offline prompt so the UI and capture logic knows it's ready
-            fputs("pm3 --> ", stdout)
-            fflush(stdout)
-
-            while !shouldQuit.load() {
-                cmdSema.wait()
-                if shouldQuit.load() { break }
-                let cmd: String? = cmdQueue.withLock { q in
-                    q.isEmpty ? nil : q.removeFirst()
-                }
-                guard let cmd else { continue }
-                cmd.withCString { _ = pm3Console(nil, $0, false, false) }
+        // Use Swift concurrency to wait for the local socket to accept without blocking the main thread
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let acceptReadySema = DispatchSemaphore(value: 0)
+            
+            // Start local accept thread
+            Thread { [weak self] in
+                var clientAddr = sockaddr()
+                var clientAddrLen = socklen_t(MemoryLayout<sockaddr>.size)
+                let fd = Darwin.accept(serverFD, &clientAddr, &clientAddrLen)
+                close(serverFD)
                 
-                // Signal command completion to the UI parser
-                fputs("\npm3 --> ", stdout)
+                Task { @MainActor in
+                    if fd >= 0 {
+                        self?.portMasterFD = fd
+                        continuation.resume()
+                        // Allow the main thread to run its next loop (which attaches the transport)
+                        // before signaling the C worker thread to start communicating.
+                        DispatchQueue.main.async {
+                            acceptReadySema.signal()
+                        }
+                    } else {
+                        continuation.resume(throwing: RunnerError.pipeFailed)
+                    }
+                }
+            }.start()
+
+            let thread = Thread { [weak self] in
+                // Wait until Swift has fully attached the transport relay
+                acceptReadySema.wait()
+
+                // Open the C client, pointing it to our local TCP loopback
+                let dev = pm3Open(connectionString)
+
+                // Print the initial prompt so the UI and capture logic knows it's ready
+                fputs("pm3 --> ", stdout)
                 fflush(stdout)
-            }
-            pm3Close(nil)   // safe when pm3_present is false — just frees grabber
 
-            close(STDOUT_FILENO)
-            if savedStdout >= 0 { dup2(savedStdout, STDOUT_FILENO); close(savedStdout) }
+                while !shouldQuit.load() {
+                    cmdSema.wait()
+                    if shouldQuit.load() { break }
+                    let cmd: String? = cmdQueue.withLock { q in
+                        q.isEmpty ? nil : q.removeFirst()
+                    }
+                    guard let cmd else { continue }
+                    cmd.withCString { _ = pm3Console(dev, $0, false, false) }
+                    
+                    // Signal command completion to the UI parser
+                    fputs("\npm3 --> ", stdout)
+                    fflush(stdout)
+                }
+                pm3Close(dev)
 
-            Task { @MainActor in
-                self?.isRunning = false
-                self?.processStatus = "Exited"
+                close(STDOUT_FILENO)
+                if savedStdout >= 0 { dup2(savedStdout, STDOUT_FILENO); close(savedStdout) }
+
+                Task { @MainActor in
+                    self?.isRunning = false
+                    self?.processStatus = "Exited"
+                }
             }
+            thread.name = "pm3-libpm3"
+            thread.stackSize = 8 * 1024 * 1024
+            thread.start()
         }
-        thread.name = "pm3-libpm3"
-        thread.stackSize = 8 * 1024 * 1024
-        thread.start()
     }
 
     /// Simulator path — spawn the native macOS pm3 binary as a subprocess with the

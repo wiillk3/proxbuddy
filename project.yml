@@ -48,13 +48,20 @@ targets:
         type: folder
 
     resources:
-      - path: ProxBuddy/Resources/python311.zip
+      - path: ProxBuddy/Resources/python313.zip
 
     info:
       path: ProxBuddy/Info.plist
       properties:
         UILaunchScreen:
           UIColorName: White
+        NSLocalNetworkUsageDescription: "Access the local network to find and connect to the ProxBuddy Bridge proxy."
+        NSBluetoothAlwaysUsageDescription: "ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device."
+        NSBluetoothPeripheralUsageDescription: "ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device."
+        UIBackgroundModes:
+          - bluetooth-central
+        NSBonjourServices:
+          - "_proxbuddy._tcp"
 
     entitlements:
       path: ProxBuddy/ProxBuddy.entitlements
@@ -74,6 +81,24 @@ targets:
       - framework: ProxBuddy/Python.xcframework
         embed: true
         link: true
+      - framework: ProxBuddy/Resources/tools/libstaticnested_0nt.dylib
+        embed: true
+        link: false
+      - framework: ProxBuddy/Resources/tools/libstaticnested_1nt.dylib
+        embed: true
+        link: false
+      - framework: ProxBuddy/Resources/tools/libstaticnested_2nt.dylib
+        embed: true
+        link: false
+      - framework: ProxBuddy/Resources/tools/libstaticnested_2x1nt_rf08s.dylib
+        embed: true
+        link: false
+      - framework: ProxBuddy/Resources/tools/libstaticnested_2x1nt_rf08s_1key.dylib
+        embed: true
+        link: false
+      - framework: ProxBuddy/Resources/tools/libmfulc_des_brute.dylib
+        embed: true
+        link: false
 
   ProxBuddyTests:
     type: bundle.unit-test

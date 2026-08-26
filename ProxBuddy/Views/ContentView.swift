@@ -44,6 +44,7 @@ struct ContentView: View {
             .environmentObject(session.engine)
             .environmentObject(session.runner)
             .environmentObject(session.transport)
+            .environmentObject(session.bleTransport)
         #endif
     }
 
@@ -75,6 +76,8 @@ struct ContentView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(5)
         }
+        .tint(.hackerGreen)
+        .preferredColorScheme(.dark)
     }
 
     // MARK: - Terminal tab (iPad split / iPhone single)
@@ -113,6 +116,7 @@ struct ContentView: View {
             .environmentObject(session.engine)
             .environmentObject(session.runner)
             .environmentObject(session.transport)
+            .environmentObject(session.bleTransport)
             .environmentObject(appNav)
         #endif
     }

@@ -132,35 +132,49 @@ struct CommandPageView: View {
     }
 
     private func pageList(_ page: CommandPage) -> some View {
-        List {
-            // Favorites strip — only shown at the root level
-            if commandPath.isEmpty && !favorites.favorites.isEmpty {
-                Section("Favorites") {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(favorites.favorites) { fav in
-                                FavoriteChip(fav: fav, favorites: favorites)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 20) {
+                // Favorites strip
+                if commandPath.isEmpty && !favorites.favorites.isEmpty {
+                    VStack(alignment: .leading) {
+                        Text("Favorites").hackerText().font(.headline)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(favorites.favorites) { fav in
+                                    FavoriteChip(fav: fav, favorites: favorites)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+
+                ForEach(page.sections) { section in
+                    VStack(alignment: .leading, spacing: 12) {
+                        if !section.name.isEmpty {
+                            Text(section.name.uppercased())
+                                .hackerText()
+                                .font(.subheadline)
+                                .opacity(0.8)
+                        }
+                        VStack(spacing: 0) {
+                            ForEach(Array(section.entries.enumerated()), id: \.element.id) { idx, entry in
+                                entryRow(entry)
+                                if idx < section.entries.count - 1 {
+                                    Divider().background(Color.glassBorder)
+                                        .padding(.leading, 46)
+                                }
                             }
                         }
-                        .padding(.vertical, 4)
+                        .liquidGlassCard()
                     }
-                    .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+                    .padding(.horizontal)
                 }
             }
-
-            ForEach(page.sections) { section in
-                if section.name.isEmpty {
-                    Section {
-                        ForEach(section.entries) { entry in entryRow(entry) }
-                    }
-                } else {
-                    Section(section.name) {
-                        ForEach(section.entries) { entry in entryRow(entry) }
-                    }
-                }
-            }
+            .padding(.vertical)
         }
-        .listStyle(.insetGrouped)
+        .hackerBackground()
     }
 
     @ViewBuilder
@@ -171,20 +185,25 @@ struct CommandPageView: View {
         NavigationLink(value: dest) {
             HStack(spacing: 12) {
                 Image(systemName: entry.isGroup ? "folder.fill" : "terminal.fill")
-                    .foregroundStyle(entry.isGroup ? .green : .orange)
+                    .foregroundStyle(.hackerGreen)
                     .frame(width: 22, alignment: .center)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.name)
-                        .font(.system(.body, design: .monospaced))
+                        .hackerText()
                         .fontWeight(.medium)
-                        .foregroundStyle(.primary)
                     Text(entry.description)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+            .padding(.vertical, 8)
         }
+        .buttonStyle(.plain)
     }
 }
 
@@ -201,17 +220,15 @@ struct FavoriteChip: View {
         VStack(spacing: 5) {
             Image(systemName: "star.fill")
                 .font(.system(size: 11))
-                .foregroundStyle(.yellow)
             Text(fav.label)
                 .font(.system(.caption2, design: .monospaced))
                 .lineLimit(1)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(pressed ? Color.yellow.opacity(0.25) : Color.yellow.opacity(0.1))
-        .foregroundStyle(.yellow)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.yellow.opacity(0.4), lineWidth: 1))
+        .background(pressed ? Color.hackerGreen.opacity(0.25) : Color.clear)
+        .foregroundStyle(.hackerGreen)
+        .liquidGlassCard()
         .scaleEffect(pressed ? 0.95 : 1)
         .animation(.easeInOut(duration: 0.08), value: pressed)
         .onTapGesture {
@@ -282,36 +299,49 @@ struct ScriptBrowserView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List {
-                    if let msg = importMessage {
-                        Section {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 20) {
+                        if let msg = importMessage {
                             Label(msg, systemImage: importFailed ? "xmark.circle" : "checkmark.circle")
-                                .foregroundStyle(importFailed ? .red : .green)
+                                .foregroundStyle(importFailed ? .red : .hackerGreen)
                                 .font(.caption)
+                                .liquidGlassCard()
+                                .padding(.horizontal)
                         }
-                    }
 
-                    let grouped = Dictionary(grouping: scripts, by: \.ext)
-                    let order = ["lua", "py", "cmd"]
-                    ForEach(order, id: \.self) { ext in
-                        if let group = grouped[ext], !group.isEmpty {
-                            Section(sectionTitle(ext)) {
-                                ForEach(group) { script in
-                                    NavigationLink(value: BrowserDestination.builder("script run \(script.runArg)")) {
-                                        scriptRow(script)
-                                    }
-                                    .swipeActions(edge: .trailing) {
-                                        Button(role: .destructive) { deleteScript(script) } label: {
-                                            Label("Delete", systemImage: "trash")
+                        let grouped = Dictionary(grouping: scripts, by: \.ext)
+                        let order = ["lua", "py", "cmd"]
+                        ForEach(order, id: \.self) { ext in
+                            if let group = grouped[ext], !group.isEmpty {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text(sectionTitle(ext).uppercased())
+                                        .hackerText()
+                                        .font(.subheadline)
+                                        .opacity(0.8)
+                                    VStack(spacing: 0) {
+                                        ForEach(Array(group.enumerated()), id: \.element.id) { idx, script in
+                                            NavigationLink(value: BrowserDestination.builder("script run \(script.runArg)")) {
+                                                scriptRow(script)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .contextMenu {
+                                                Button(role: .destructive) { deleteScript(script) } label: {
+                                                    Label("Delete", systemImage: "trash")
+                                                }
+                                            }
+                                            if idx < group.count - 1 {
+                                                Divider().background(Color.glassBorder)
+                                                    .padding(.leading, 46)
+                                            }
                                         }
                                     }
+                                    .liquidGlassCard()
                                 }
+                                .padding(.horizontal)
                             }
                         }
-                    }
 
-                    if scripts.isEmpty {
-                        Section {
+                        if scripts.isEmpty {
                             ContentUnavailableView(
                                 "No Scripts Found",
                                 systemImage: "scroll.fill",
@@ -319,8 +349,9 @@ struct ScriptBrowserView: View {
                             )
                         }
                     }
+                    .padding(.vertical)
                 }
-                .listStyle(.insetGrouped)
+                .hackerBackground()
             }
         }
         .toolbar {
@@ -346,19 +377,24 @@ struct ScriptBrowserView: View {
     private func scriptRow(_ script: ScriptEntry) -> some View {
         HStack(spacing: 12) {
             Image(systemName: script.icon)
-                .foregroundStyle(script.color)
+                .foregroundStyle(.hackerGreen)
                 .frame(width: 22, alignment: .center)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(script.displayName)
-                        .font(.system(.body, design: .monospaced))
+                        .hackerText()
                         .fontWeight(.medium)
                     Text(".\(script.ext)")
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
             }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+        .padding(.vertical, 8)
     }
 
     private func sectionTitle(_ ext: String) -> String {

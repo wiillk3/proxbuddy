@@ -116,35 +116,41 @@ struct DumpManagerView: View {
     }
 
     private var groupList: some View {
-        List {
-            ForEach(vm.groupedByDate, id: \.label) { bucket in
-                Section(bucket.label) {
-                    ForEach(bucket.groups) { group in
-                        NavigationLink {
-                            DumpDetailView(group: group, vm: vm)
-                        } label: {
-                            DumpGroupRow(group: group)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) { vm.delete(group) } label: {
-                                Label("Delete All", systemImage: "trash")
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 20) {
+                ForEach(vm.groupedByDate, id: \.label) { bucket in
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(bucket.label.uppercased()).hackerText().font(.subheadline).opacity(0.8)
+                        VStack(spacing: 0) {
+                            ForEach(Array(bucket.groups.enumerated()), id: \.element.id) { idx, group in
+                                NavigationLink {
+                                    DumpDetailView(group: group, vm: vm)
+                                } label: {
+                                    DumpGroupRow(group: group)
+                                }
+                                .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button(role: .destructive) { vm.delete(group) } label: { Label("Delete All", systemImage: "trash") }
+                                    if let f = group.primaryFile, let cmd = group.family.eloadCommand(file: f.baseName) {
+                                        Button {
+                                            engine.sendCommand(cmd)
+                                            appNav.selectedTab = AppNavigation.terminalTab
+                                        } label: { Label("Load", systemImage: "memorychip") }
+                                    }
+                                }
+                                if idx < bucket.groups.count - 1 {
+                                    Divider().background(Color.glassBorder).padding(.leading, 56)
+                                }
                             }
                         }
-                        .swipeActions(edge: .leading) {
-                            if let f = group.primaryFile,
-                               let cmd = group.family.eloadCommand(file: f.baseName) {
-                                Button {
-                                    engine.sendCommand(cmd)
-                                    appNav.selectedTab = AppNavigation.terminalTab
-                                } label: { Label("Load", systemImage: "memorychip") }
-                                .tint(.green)
-                            }
-                        }
+                        .liquidGlassCard()
                     }
+                    .padding(.horizontal)
                 }
             }
+            .padding(.vertical)
         }
-        .listStyle(.insetGrouped)
+        .hackerBackground()
     }
 }
 
@@ -170,7 +176,7 @@ struct DumpGroupRow: View {
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(group.uid ?? group.id)
-                    .font(.system(.body, design: .monospaced)).fontWeight(.semibold)
+                    .hackerText().fontWeight(.semibold)
                 Text(group.family.displayName)
                     .font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 4) {
@@ -205,7 +211,7 @@ struct DumpDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            headerCard
+            headerCard.padding(.bottom, 8)
 
             if isLoading {
                 Spacer()
@@ -219,9 +225,8 @@ struct DumpDetailView: View {
                     Text("Actions").tag(3)
                 }
                 .pickerStyle(.segmented)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color(uiColor: .systemGroupedBackground))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
 
                 switch selectedTab {
                 case 0: BlocksTabView(dump: dump)
@@ -230,14 +235,13 @@ struct DumpDetailView: View {
                 default: ActionsTabView(group: group, parsed: dump, engine: engine, appNav: appNav, vm: vm)
                 }
             } else {
-                // No parseable dump file — show file list only
                 Picker("", selection: $selectedTab) {
                     Text("Files").tag(0)
                     Text("Actions").tag(1)
                 }
                 .pickerStyle(.segmented)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(Color(uiColor: .systemGroupedBackground))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
 
                 if selectedTab == 0 {
                     FilesTabView(group: group, vm: vm)
@@ -246,7 +250,7 @@ struct DumpDetailView: View {
                 }
             }
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        .hackerBackground()
         .navigationTitle(group.uid ?? group.id)
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadContent() }
@@ -261,7 +265,7 @@ struct DumpDetailView: View {
                     .foregroundStyle(group.family.tint).font(.system(size: 22))
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(group.family.displayName).font(.headline)
+                Text(group.family.displayName).font(.headline).foregroundStyle(.primary)
                 if let dump = parsed {
                     Text(dump.cardLabel).font(.subheadline).foregroundStyle(.secondary)
                     HStack(spacing: 8) {
@@ -275,8 +279,8 @@ struct DumpDetailView: View {
             }
             Spacer()
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .liquidGlassCard()
+        .padding(.horizontal, 16)
     }
 
     private func infoChip(_ label: String, _ value: String) -> some View {
@@ -304,71 +308,82 @@ struct BlocksTabView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
-                ForEach(dump.sectors) { sector in
-                    Section {
-                        ForEach(sector.blocks) { block in
-                            blockRow(block, isTrailer: block.id == sector.trailerBlock.id)
-                        }
-                    } header: {
-                        sectorHeader(sector)
+            VStack(spacing: 0) {
+                // Header bar
+                HStack(spacing: 0) {
+                    Text("BLK").font(.system(size: 10, design: .monospaced)).fontWeight(.bold).foregroundStyle(.secondary).frame(width: 32, alignment: .center)
+                    Text("DATA (16 BYTES)").font(.system(size: 10, design: .monospaced)).fontWeight(.bold).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 8)
+                    Text("ASCII").font(.system(size: 10, design: .monospaced)).fontWeight(.bold).foregroundStyle(.secondary).frame(width: 82, alignment: .leading)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.4))
+
+                Divider().background(Color.glassBorder)
+
+                let allBlocks = dump.sectors.flatMap(\.blocks)
+                ForEach(Array(allBlocks.enumerated()), id: \.element.id) { idx, block in
+                    // Subtle line divider at sector boundaries
+                    if idx > 0 && isSectorStart(blockId: block.id) {
+                        Rectangle()
+                            .fill(Color.hackerGreen.opacity(0.4))
+                            .frame(height: 1)
+                    }
+
+                    unifiedBlockRow(block, isTrailer: isSectorTrailer(blockId: block.id), isBlock0: block.id == 0)
+                    
+                    if idx < allBlocks.count - 1 && !isSectorStart(blockId: allBlocks[idx + 1].id) {
+                        Divider().background(Color.glassBorder.opacity(0.2))
                     }
                 }
             }
+            .liquidGlassCard()
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
             .padding(.bottom, 20)
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        .hackerBackground()
     }
 
-    private func sectorHeader(_ sector: MFSector) -> some View {
-        HStack(spacing: 8) {
-            Text("Sector \(sector.id)")
-                .font(.system(.caption, design: .monospaced)).fontWeight(.bold)
-            Spacer()
-            keyPill("A", key: sector.keyA, status: sector.keyAStatus)
-            keyPill("B", key: sector.keyB, status: sector.keyBStatus)
-        }
-        .padding(.horizontal, 12).padding(.vertical, 5)
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
+    private func isSectorStart(blockId: Int) -> Bool {
+        dump.sectors.contains { $0.blocks.first?.id == blockId }
     }
 
-    private func blockRow(_ block: MFBlock, isTrailer: Bool) -> some View {
+    private func isSectorTrailer(blockId: Int) -> Bool {
+        dump.sectors.contains { $0.trailerBlock.id == blockId }
+    }
+
+    private func unifiedBlockRow(_ block: MFBlock, isTrailer: Bool, isBlock0: Bool) -> some View {
         HStack(spacing: 0) {
-            Text(String(format: "%3d", block.id))
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 28, alignment: .trailing)
-                .padding(.leading, 12)
+            Text(String(format: "%02d", block.id))
+                .font(.system(size: 11, design: .monospaced))
+                .fontWeight(isTrailer || isBlock0 ? .bold : .regular)
+                .foregroundStyle(isBlock0 ? Color.cyan : (isTrailer ? Color.orange : Color.secondary))
+                .frame(width: 32, alignment: .center)
 
-            Text("  " + block.hex)
+            Text(block.hex)
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(isTrailer ? Color.orange : (block.isBlank ? Color.secondary.opacity(0.5) : Color.primary))
+                .foregroundStyle(
+                    isBlock0 ? Color.cyan :
+                    (isTrailer ? Color.orange :
+                    (block.isBlank ? Color.secondary.opacity(0.4) : Color.primary))
+                )
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 8)
 
             Text(block.ascii)
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(Color.secondary.opacity(0.6))
+                .foregroundStyle(Color.secondary.opacity(0.7))
                 .frame(width: 82, alignment: .leading)
-                .padding(.trailing, 8)
         }
-        .padding(.vertical, 3)
-        .background(isTrailer ? Color.orange.opacity(0.05) : Color.clear)
-    }
-
-    private func keyPill(_ letter: String, key: String, status: MFSector.KeyStatus) -> some View {
-        let color: Color = switch status {
-        case .defaultKey: .orange
-        case .blank:      .red
-        case .custom:     .green
-        }
-        return HStack(spacing: 2) {
-            Text("K\(letter)").font(.system(.caption2, design: .monospaced)).fontWeight(.bold)
-            Text(key.prefix(6)).font(.system(.caption2, design: .monospaced))
-        }
-        .padding(.horizontal, 4).padding(.vertical, 2)
-        .background(color.opacity(0.15)).foregroundStyle(color)
-        .clipShape(Capsule())
+        .padding(.vertical, 5)
+        .padding(.horizontal, 6)
+        .background(
+            isBlock0 ? Color.cyan.opacity(0.06) :
+            (isTrailer ? Color.orange.opacity(0.06) : Color.clear)
+        )
     }
 }
 
@@ -383,13 +398,14 @@ struct KeysTabView: View {
                 // Header row
                 keysHeaderRow
 
-                ForEach(dump.sectors) { sector in
+                ForEach(Array(dump.sectors.enumerated()), id: \.element.id) { idx, sector in
                     keysRow(sector)
-                    Divider().padding(.leading, 44)
+                    if idx < dump.sectors.count - 1 {
+                        Divider().background(Color.glassBorder).padding(.leading, 44)
+                    }
                 }
             }
-            .background(Color(uiColor: .secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .liquidGlassCard()
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .padding(.bottom, 20)
@@ -403,7 +419,7 @@ struct KeysTabView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 20)
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        .hackerBackground()
     }
 
     private var keysHeaderRow: some View {
@@ -415,7 +431,7 @@ struct KeysTabView: View {
         .font(.system(.caption2, design: .monospaced)).fontWeight(.bold)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(Color(uiColor: .tertiarySystemGroupedBackground))
+        .background(Color.black.opacity(0.3))
     }
 
     private func keysRow(_ sector: MFSector) -> some View {
@@ -457,35 +473,41 @@ struct FilesTabView: View {
     @ObservedObject var vm: DumpManagerViewModel
 
     var body: some View {
-        List {
-            Section {
-                ForEach(group.files) { file in
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(file.fileName)
-                                .font(.system(.subheadline, design: .monospaced))
-                                .lineLimit(1)
-                            Text("\(file.ext.uppercased()) · \(file.sizeString) · \(file.modDate.formatted(.relative(presentation: .named)))")
-                                .font(.caption).foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("\(group.files.count) file\(group.files.count == 1 ? "" : "s")".uppercased())
+                    .hackerText().font(.subheadline).opacity(0.8)
+                VStack(spacing: 0) {
+                    ForEach(Array(group.files.enumerated()), id: \.element.id) { idx, file in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(file.fileName)
+                                    .hackerText().font(.subheadline)
+                                    .lineLimit(1)
+                                Text("\(file.ext.uppercased()) · \(file.sizeString) · \(file.modDate.formatted(.relative(presentation: .named)))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            ShareLink(item: file.url) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .foregroundStyle(.hackerGreen)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        Spacer()
-                        ShareLink(item: file.url) {
-                            Image(systemName: "square.and.arrow.up")
-                                .foregroundStyle(.blue)
+                        .padding(.vertical, 8)
+                        .contextMenu {
+                            Button(role: .destructive) { vm.delete(file) } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
                         }
-                        .buttonStyle(.plain)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) { vm.delete(file) } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
+                        if idx < group.files.count - 1 { Divider().background(Color.glassBorder) }
                     }
                 }
-            } header: {
-                Text("\(group.files.count) file\(group.files.count == 1 ? "" : "s")")
+                .liquidGlassCard()
             }
+            .padding()
         }
-        .listStyle(.insetGrouped)
+        .hackerBackground()
     }
 }
 
@@ -505,81 +527,95 @@ struct ActionsTabView: View {
     @AppStorage("stubEmulatorFlow") private var stubEmulator = false
 
     var body: some View {
-        List {
-            if let f = group.primaryFile {
-                Section("Emulator") {
-                    if let cmd = group.family.eloadCommand(file: f.baseName) {
-                        actionRow("Load to Emulator", icon: "memorychip", color: .green) {
-                            if stubEmulator {
-                                Task { _ = await engine.captureOutputSilent(cmd) }
-                            } else {
-                                engine.sendCommand(cmd)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 20) {
+                if let f = group.primaryFile {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("EMULATOR").hackerText().font(.subheadline).opacity(0.8)
+                        VStack(alignment: .leading, spacing: 16) {
+                            if let cmd = group.family.eloadCommand(file: f.baseName) {
+                                actionRow("Load to Emulator", icon: "memorychip", color: .hackerGreen) {
+                                    if stubEmulator {
+                                        Task { _ = await engine.captureOutputSilent(cmd) }
+                                    } else {
+                                        engine.sendCommand(cmd)
+                                    }
+                                }
+                            }
+
+                            if let simCmd = group.family.simCommand(uid: group.uid, is4K: is4K) {
+                                actionRow(
+                                    isSimulating ? "Stop Simulation" : "Simulate",
+                                    icon: isSimulating ? "stop.circle.fill" : "wave.3.right",
+                                    color: isSimulating ? .red : .orange
+                                ) {
+                                    if isSimulating {
+                                        engine.sendCommand("q")
+                                        isSimulating = false
+                                    } else {
+                                        Task {
+                                            if let eload = group.family.eloadCommand(file: f.baseName) {
+                                                _ = await engine.captureOutputSilent(eload)
+                                            }
+                                            engine.sendCommand(simCmd)
+                                            isSimulating = true
+                                            appNav.selectedTab = AppNavigation.terminalTab
+                                        }
+                                    }
+                                }
+                            }
+
+                            if group.family.eviewCommand != nil {
+                                actionRow(
+                                    isCapturingEview ? "Reading…" : "View Emulator Memory",
+                                    icon: isCapturingEview ? "hourglass" : "doc.text.magnifyingglass",
+                                    color: .teal
+                                ) {
+                                    guard !isCapturingEview, let cmd = group.family.eviewCommand else { return }
+                                    Task {
+                                        isCapturingEview = true
+                                        eviewLines = await engine.captureOutputSilent(cmd)
+                                        isCapturingEview = false
+                                        showEview = true
+                                    }
+                                }
+                                .disabled(isCapturingEview)
                             }
                         }
+                        .liquidGlassCard()
                     }
 
-                    if let simCmd = group.family.simCommand(uid: group.uid, is4K: is4K) {
-                        actionRow(
-                            isSimulating ? "Stop Simulation" : "Simulate",
-                            icon: isSimulating ? "stop.circle.fill" : "wave.3.right",
-                            color: isSimulating ? .red : .orange
-                        ) {
-                            if isSimulating {
-                                engine.sendCommand("q")
-                                isSimulating = false
-                            } else {
-                                Task {
-                                    // Automatically load to emulator memory first
-                                    if let eload = group.family.eloadCommand(file: f.baseName) {
-                                        _ = await engine.captureOutputSilent(eload)
-                                    }
-                                    engine.sendCommand(simCmd)
-                                    isSimulating = true
+                    if group.family == .mifareClassic {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("WRITE TO PHYSICAL CARD").hackerText().font(.subheadline).opacity(0.8)
+                            VStack(alignment: .leading, spacing: 16) {
+                                actionRow("Restore (gen1)", icon: "arrow.triangle.2.circlepath", color: .blue) {
+                                    engine.sendCommand("hf mf restore -f \(f.baseName)")
+                                    appNav.selectedTab = AppNavigation.terminalTab
+                                }
+                                actionRow("Write (gen4 GTU)", icon: "square.and.pencil", color: .indigo) {
+                                    engine.sendCommand("hf mf gload -f \(f.baseName)")
                                     appNav.selectedTab = AppNavigation.terminalTab
                                 }
                             }
+                            .liquidGlassCard()
                         }
-                    }
-
-                    if group.family.eviewCommand != nil {
-                        actionRow(
-                            isCapturingEview ? "Reading…" : "View Emulator Memory",
-                            icon: isCapturingEview ? "hourglass" : "doc.text.magnifyingglass",
-                            color: .teal
-                        ) {
-                            guard !isCapturingEview, let cmd = group.family.eviewCommand else { return }
-                            Task {
-                                isCapturingEview = true
-                                eviewLines = await engine.captureOutputSilent(cmd)
-                                isCapturingEview = false
-                                showEview = true
-                            }
-                        }
-                        .disabled(isCapturingEview)
                     }
                 }
 
-                if group.family == .mifareClassic {
-                    Section("Write to Physical Card") {
-                        actionRow("Restore (gen1)", icon: "arrow.triangle.2.circlepath", color: .blue) {
-                            engine.sendCommand("hf mf restore -f \(f.baseName)")
-                            appNav.selectedTab = AppNavigation.terminalTab
-                        }
-                        actionRow("Write (gen4 GTU)", icon: "square.and.pencil", color: .indigo) {
-                            engine.sendCommand("hf mf gload -f \(f.baseName)")
-                            appNav.selectedTab = AppNavigation.terminalTab
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("DANGER ZONE").hackerText().font(.subheadline).opacity(0.8)
+                    VStack(alignment: .leading, spacing: 16) {
+                        actionRow("Delete All Files", icon: "trash", color: .red, role: .destructive) {
+                            vm.delete(group)
                         }
                     }
+                    .liquidGlassCard()
                 }
             }
-
-            Section {
-                actionRow("Delete All Files", icon: "trash", color: .red, role: .destructive) {
-                    vm.delete(group)
-                }
-            }
+            .padding()
         }
-        .listStyle(.insetGrouped)
+        .hackerBackground()
         .sheet(isPresented: $showEview) {
             EmulatorMemorySheet(lines: eviewLines)
         }

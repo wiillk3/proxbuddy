@@ -14,7 +14,6 @@ struct DiscoveredPeripheral: Identifiable, Sendable {
     let id: UUID
     let name: String
     let rssi: Int
-    // CBPeripheral is not Sendable but we isolate access to MainActor
     nonisolated(unsafe) let peripheral: CBPeripheral
 }
 
@@ -24,16 +23,17 @@ final class BLETransport: NSObject, ObservableObject {
     @Published var discoveredPeripherals: [DiscoveredPeripheral] = []
     @Published var connectedPeripheralName: String?
     @Published var negotiatedMTU: Int = 20
-    @Published var ptyPath: String?
+    @Published var batteryLevel: Int? = nil
 
     private var centralManager: CBCentralManager!
     private var connectedPeripheral: CBPeripheral?
-    private var txCharacteristic: CBCharacteristic?
-    private var rxCharacteristic: CBCharacteristic?
+    private var dataCharacteristic: CBCharacteristic?
+    private var nusTxCharacteristic: CBCharacteristic?
+    private var nusRxCharacteristic: CBCharacteristic?
+    private var batteryCharacteristic: CBCharacteristic?
 
-    // PTY master fd — accessed only from MainActor or with ptyWriteQueue
-    private var ptyMasterFD: Int32 = -1
-    private let ptyWriteQueue = DispatchQueue(label: "com.proxbuddy.pty.write", qos: .userInteractive)
+    private var portFD: Int32 = -1
+    private let portWriteQueue = DispatchQueue(label: "com.proxbuddy.ble.port", qos: .userInteractive)
 
     let connectionEvents: AsyncStream<ConnectionState>
     private let connectionContinuation: AsyncStream<ConnectionState>.Continuation
@@ -43,32 +43,23 @@ final class BLETransport: NSObject, ObservableObject {
         super.init()
         centralManager = CBCentralManager(
             delegate: self,
-            queue: .main,
-            options: [CBCentralManagerOptionRestoreIdentifierKey: "com.proxbuddy.central"]
+            queue: .main
         )
-        setupPTY()
     }
 
-    // MARK: - PTY
+    // MARK: - Port Attachment (Relay between pm3 & BLE)
 
-    private func setupPTY() {
-        let master = posix_openpt(O_RDWR | O_NOCTTY)
-        guard master >= 0,
-              grantpt(master) == 0,
-              unlockpt(master) == 0 else { return }
-        ptyMasterFD = master
-
-        if let slaveName = ptsname(master) {
-            ptyPath = String(cString: slaveName)
-        }
-        startPTYReadLoop(masterFD: master)
+    /// Called by PM3Session / BinaryRunner after launching the C engine loopback socket.
+    func attach(portFD: Int32) {
+        self.portFD = portFD
+        startRelayLoop(fd: portFD)
     }
 
-    private func startPTYReadLoop(masterFD: Int32) {
+    private func startRelayLoop(fd: Int32) {
         Task.detached(priority: .userInteractive) { [weak self] in
             var buf = [UInt8](repeating: 0, count: 512)
             while true {
-                let n = read(masterFD, &buf, buf.count)
+                let n = read(fd, &buf, buf.count)
                 guard n > 0 else { break }
                 let data = Data(buf[..<n])
                 await self?.writeToBLE(data: data)
@@ -76,26 +67,29 @@ final class BLETransport: NSObject, ObservableObject {
         }
     }
 
-    // pm3client wrote to PTY slave → we forward to PM5 via BLE RX characteristic
+    /// pm3 engine wrote bytes -> send out over BLE to PM5
     private func writeToBLE(data: Data) {
-        guard let peripheral = connectedPeripheral,
-              let rxChar = rxCharacteristic,
-              connectionState == .ready else { return }
+        guard let peripheral = connectedPeripheral, connectionState == .ready else { return }
+
+        let targetChar = dataCharacteristic ?? nusRxCharacteristic
+        guard let char = targetChar else { return }
 
         let chunkSize = max(1, negotiatedMTU - 3)
         var offset = 0
         while offset < data.count {
             let end = min(offset + chunkSize, data.count)
-            peripheral.writeValue(data[offset..<end], for: rxChar, type: .withoutResponse)
+            let chunk = data[offset..<end]
+            let writeType: CBCharacteristicWriteType = char.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
+            peripheral.writeValue(chunk, for: char, type: writeType)
             offset = end
         }
     }
 
-    // PM5 sent data via TX notification → write to PTY master → pm3client reads from PTY slave
+    /// PM5 sent data via BLE notification -> write to pm3 engine socket
     private func receivedFromBLE(_ data: Data) {
-        let fd = ptyMasterFD
+        let fd = portFD
         guard fd >= 0 else { return }
-        ptyWriteQueue.async {
+        portWriteQueue.async {
             data.withUnsafeBytes { ptr in
                 guard let base = ptr.baseAddress else { return }
                 _ = write(fd, base, data.count)
@@ -103,14 +97,14 @@ final class BLETransport: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Public
+    // MARK: - Scanning & Connection Management
 
     func startScanning() {
         discoveredPeripherals = []
         connectionState = .scanning
         centralManager.scanForPeripherals(
-            withServices: [NUS.serviceUUID],
-            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+            withServices: [PM5BLE.sppServiceUUID, PM5BLE.batteryServiceUUID, PM5BLE.nusServiceUUID],
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
         )
     }
 
@@ -127,16 +121,13 @@ final class BLETransport: NSObject, ObservableObject {
     }
 
     func disconnect() {
-        if let p = connectedPeripheral { centralManager.cancelPeripheralConnection(p) }
-    }
-
-    func closePTY() {
-        if ptyMasterFD >= 0 { close(ptyMasterFD); ptyMasterFD = -1 }
+        if let p = connectedPeripheral {
+            centralManager.cancelPeripheralConnection(p)
+        }
     }
 }
 
 // MARK: - CBCentralManagerDelegate
-// All callbacks arrive on queue: .main (set in init), so assumeIsolated is safe.
 
 extension BLETransport: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
@@ -155,9 +146,10 @@ extension BLETransport: CBCentralManagerDelegate {
     ) {
         let name = peripheral.name
             ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String
-            ?? "Unknown"
+            ?? "Proxmark5"
         let id   = peripheral.identifier
         let rssi = RSSI.intValue
+
         MainActor.assumeIsolated {
             let discovered = DiscoveredPeripheral(id: id, name: name, rssi: rssi, peripheral: peripheral)
             if let idx = discoveredPeripherals.firstIndex(where: { $0.id == id }) {
@@ -171,9 +163,9 @@ extension BLETransport: CBCentralManagerDelegate {
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         MainActor.assumeIsolated {
             connectionState = .discoveringServices
-            connectedPeripheralName = peripheral.name
+            connectedPeripheralName = peripheral.name ?? "Proxmark5"
             peripheral.delegate = self
-            peripheral.discoverServices([NUS.serviceUUID])
+            peripheral.discoverServices([PM5BLE.sppServiceUUID, PM5BLE.batteryServiceUUID, PM5BLE.nusServiceUUID])
         }
     }
 
@@ -197,8 +189,11 @@ extension BLETransport: CBCentralManagerDelegate {
             connectionState = .disconnected
             connectedPeripheral = nil
             connectedPeripheralName = nil
-            txCharacteristic = nil
-            rxCharacteristic = nil
+            dataCharacteristic = nil
+            nusTxCharacteristic = nil
+            nusRxCharacteristic = nil
+            batteryCharacteristic = nil
+            batteryLevel = nil
             negotiatedMTU = 20
             _ = connectionContinuation.yield(.disconnected)
         }
@@ -211,13 +206,20 @@ extension BLETransport: CBCentralManagerDelegate {
 
 extension BLETransport: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard error == nil,
-              let service = peripheral.services?.first(where: { $0.uuid == NUS.serviceUUID })
-        else {
+        guard error == nil, let services = peripheral.services else {
             MainActor.assumeIsolated { connectionState = .error }
             return
         }
-        peripheral.discoverCharacteristics([NUS.txCharUUID, NUS.rxCharUUID], for: service)
+
+        for service in services {
+            if service.uuid == PM5BLE.sppServiceUUID {
+                peripheral.discoverCharacteristics([PM5BLE.sppDataCharUUID], for: service)
+            } else if service.uuid == PM5BLE.batteryServiceUUID {
+                peripheral.discoverCharacteristics([PM5BLE.batteryLevelCharUUID], for: service)
+            } else if service.uuid == PM5BLE.nusServiceUUID {
+                peripheral.discoverCharacteristics([PM5BLE.nusTxCharUUID, PM5BLE.nusRxCharUUID], for: service)
+            }
+        }
     }
 
     nonisolated func peripheral(
@@ -225,31 +227,31 @@ extension BLETransport: CBPeripheralDelegate {
         didDiscoverCharacteristicsFor service: CBService,
         error: Error?
     ) {
-        guard error == nil else {
-            MainActor.assumeIsolated { connectionState = .error }
-            return
-        }
-        var foundTX = false
-        var foundRX = false
-        for char in service.characteristics ?? [] {
-            if char.uuid == NUS.txCharUUID {
+        guard error == nil, let characteristics = service.characteristics else { return }
+
+        for char in characteristics {
+            if char.uuid == PM5BLE.sppDataCharUUID {
                 peripheral.setNotifyValue(true, for: char)
-                MainActor.assumeIsolated { txCharacteristic = char }
-                foundTX = true
-            } else if char.uuid == NUS.rxCharUUID {
-                MainActor.assumeIsolated { rxCharacteristic = char }
-                foundRX = true
+                MainActor.assumeIsolated { dataCharacteristic = char }
+            } else if char.uuid == PM5BLE.batteryLevelCharUUID {
+                peripheral.setNotifyValue(true, for: char)
+                peripheral.readValue(for: char)
+                MainActor.assumeIsolated { batteryCharacteristic = char }
+            } else if char.uuid == PM5BLE.nusTxCharUUID {
+                peripheral.setNotifyValue(true, for: char)
+                MainActor.assumeIsolated { nusTxCharacteristic = char }
+            } else if char.uuid == PM5BLE.nusRxCharUUID {
+                MainActor.assumeIsolated { nusRxCharacteristic = char }
             }
         }
-        guard foundTX && foundRX else {
-            MainActor.assumeIsolated { connectionState = .error }
-            return
-        }
+
         let payloadMTU = peripheral.maximumWriteValueLength(for: .withoutResponse)
         MainActor.assumeIsolated {
-            negotiatedMTU = payloadMTU + 3
-            connectionState = .ready
-            _ = connectionContinuation.yield(.ready)
+            if dataCharacteristic != nil || (nusTxCharacteristic != nil && nusRxCharacteristic != nil) {
+                negotiatedMTU = max(20, payloadMTU + 3)
+                connectionState = .ready
+                _ = connectionContinuation.yield(.ready)
+            }
         }
     }
 
@@ -258,10 +260,15 @@ extension BLETransport: CBPeripheralDelegate {
         didUpdateValueFor characteristic: CBCharacteristic,
         error: Error?
     ) {
-        guard error == nil,
-              characteristic.uuid == NUS.txCharUUID,
-              let data = characteristic.value
-        else { return }
-        MainActor.assumeIsolated { receivedFromBLE(data) }
+        guard error == nil, let data = characteristic.value else { return }
+
+        if characteristic.uuid == PM5BLE.sppDataCharUUID || characteristic.uuid == PM5BLE.nusTxCharUUID {
+            MainActor.assumeIsolated { receivedFromBLE(data) }
+        } else if characteristic.uuid == PM5BLE.batteryLevelCharUUID {
+            if let firstByte = data.first {
+                let level = Int(firstByte)
+                MainActor.assumeIsolated { self.batteryLevel = level }
+            }
+        }
     }
 }

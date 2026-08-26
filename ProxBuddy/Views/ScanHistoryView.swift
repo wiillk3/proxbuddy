@@ -44,24 +44,30 @@ struct ScanHistoryView: View {
                 } else if filtered.isEmpty {
                     ContentUnavailableView.search(text: searchText)
                 } else {
-                    List {
-                        ForEach(grouped, id: \.label) { section in
-                            Section(section.label) {
-                                ForEach(section.records) { record in
-                                    ScanRowView(record: record)
-                                        .swipeActions(edge: .trailing) {
-                                            Button(role: .destructive) {
-                                                store.delete(record)
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
-                                            }
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 20) {
+                            ForEach(grouped, id: \.label) { section in
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text(section.label.uppercased()).hackerText().font(.subheadline).opacity(0.8)
+                                    VStack(spacing: 0) {
+                                        ForEach(Array(section.records.enumerated()), id: \.element.id) { idx, record in
+                                            ScanRowView(record: record)
+                                                .contextMenu {
+                                                    Button(role: .destructive) { store.delete(record) } label: { Label("Delete", systemImage: "trash") }
+                                                }
+                                            if idx < section.records.count - 1 { Divider().background(Color.glassBorder) }
                                         }
+                                    }
+                                    .liquidGlassCard()
                                 }
+                                .padding(.horizontal)
                             }
                         }
+                        .padding(.vertical)
                     }
                 }
             }
+            .hackerBackground()
             .navigationTitle("Scan History")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "UID, type, protocol…")
@@ -94,31 +100,29 @@ private struct ScanRowView: View {
             // Icon
             Image(systemName: record.icon)
                 .font(.title3)
-                .foregroundStyle(tint)
+                .foregroundStyle(.hackerGreen)
                 .frame(width: 34, height: 34)
-                .background(tint.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
 
             // Content
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
                     Text(record.cardType)
-                        .font(.subheadline).fontWeight(.semibold)
+                        .hackerText().fontWeight(.semibold)
                     Spacer()
                     Text(record.timestamp, style: .time)
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 if let uid = record.uid {
                     Text(uid)
+                        .hackerText()
                         .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.green)
                 }
                 HStack(spacing: 6) {
                     Text(record.protocol_)
                         .font(.caption2)
                         .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(tint.opacity(0.12))
-                        .foregroundStyle(tint)
+                        .background(Color.hackerGreen.opacity(0.12))
+                        .foregroundStyle(.hackerGreen)
                         .clipShape(Capsule())
                     if !record.details.isEmpty {
                         Text(record.details)
@@ -129,7 +133,7 @@ private struct ScanRowView: View {
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 8)
     }
 
     private var tint: Color {

@@ -125,56 +125,71 @@ struct CommandBuilderView: View {
     }
 
     var body: some View {
-        List {
-            commandSection
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 20) {
+                commandSection
 
-            if vm.isLoading {
-                Section {
+                if vm.isLoading {
                     HStack { Spacer(); ProgressView("Loading options…"); Spacer() }
+                        .liquidGlassCard()
                 }
-            }
 
-            if let err = vm.error {
-                Section {
+                if let err = vm.error {
                     Label(err, systemImage: "xmark.circle").foregroundStyle(.red)
-                }
-            }
-
-            if let help = vm.commandHelp {
-                if !help.usage.isEmpty {
-                    Section("Usage") {
-                        Text(help.usage)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
+                        .liquidGlassCard()
                 }
 
-                let opts = help.options.filter { $0.primaryFlag != "--help" }
-                if !opts.isEmpty {
-                    Section("Options") {
-                        ForEach(opts) { opt in optionRow(opt) }
-                    }
-                } else {
-                    Section {
-                        Label("No configurable options — ready to send.", systemImage: "checkmark.circle")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if !help.examples.isEmpty {
-                    Section("Examples") {
-                        ForEach(help.examples, id: \.self) { ex in
-                            Text(ex)
+                if let help = vm.commandHelp {
+                    if !help.usage.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("USAGE").hackerText().font(.subheadline).opacity(0.8)
+                            Text(help.usage)
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
+                                .liquidGlassCard()
+                        }
+                    }
+
+                    let opts = help.options.filter { $0.primaryFlag != "--help" }
+                    if !opts.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("OPTIONS").hackerText().font(.subheadline).opacity(0.8)
+                            VStack(spacing: 0) {
+                                ForEach(Array(opts.enumerated()), id: \.element.id) { idx, opt in
+                                    optionRow(opt)
+                                    if idx < opts.count - 1 {
+                                        Divider().background(Color.glassBorder).padding(.vertical, 8)
+                                    }
+                                }
+                            }
+                            .liquidGlassCard()
+                        }
+                    } else {
+                        Label("No configurable options — ready to send.", systemImage: "checkmark.circle")
+                            .foregroundStyle(.secondary)
+                            .liquidGlassCard()
+                    }
+
+                    if !help.examples.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("EXAMPLES").hackerText().font(.subheadline).opacity(0.8)
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(help.examples, id: \.self) { ex in
+                                    Text(ex)
+                                        .font(.system(.caption, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                            .liquidGlassCard()
                         }
                     }
                 }
-
             }
+            .padding()
         }
+        .hackerBackground()
         .onChange(of: vm.commandText) { _, _ in vm.syncFromText() }
         .navigationTitle(vm.baseCommand.isEmpty ? "Command Builder" : vm.baseCommand)
         .navigationBarTitleDisplayMode(.inline)
@@ -216,12 +231,15 @@ struct CommandBuilderView: View {
     // MARK: - Sections
 
     private var commandSection: some View {
-        Section("Command") {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("COMMAND").hackerText().font(.subheadline).opacity(0.8)
             TextField("e.g. hf mf autopwn --1k", text: $vm.commandText)
+                .textFieldStyle(.plain)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .font(.system(.body, design: .monospaced))
-                .foregroundStyle(Color.green)
+                .foregroundStyle(.hackerGreen)
+                .liquidGlassCard()
                 .onSubmit { loadFromText() }
         }
     }
@@ -249,7 +267,7 @@ struct CommandBuilderView: View {
             )) {
                 flagLabel(opt)
             }
-            .tint(.green)
+            .tint(.hackerGreen)
 
         case .hex:
             OptionInputRow(opt: opt, placeholder: "hex bytes e.g. AABBCCDD", keyboard: .default, vm: vm)
@@ -267,7 +285,7 @@ struct CommandBuilderView: View {
     @ViewBuilder
     private func flagLabel(_ opt: OptionDef) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(opt.displayFlag).font(.system(.subheadline, design: .monospaced))
+            Text(opt.displayFlag).hackerText().font(.system(.subheadline, design: .monospaced))
             Text(opt.description).font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -289,7 +307,7 @@ struct OptionInputRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
-                Text(opt.displayFlag).font(.system(.subheadline, design: .monospaced))
+                Text(opt.displayFlag).hackerText().font(.system(.subheadline, design: .monospaced))
                 if let label = opt.argLabel {
                     Text("<\(label)>")
                         .font(.system(.caption, design: .monospaced))
@@ -298,7 +316,10 @@ struct OptionInputRow: View {
             }
             Text(opt.description).font(.caption).foregroundStyle(.secondary)
             TextField(placeholder, text: $text)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .padding(8)
+                .background(Color.black.opacity(0.3).cornerRadius(8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.glassBorder, lineWidth: 1))
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .keyboardType(keyboard)
@@ -331,7 +352,7 @@ struct OptionFileRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
-                Text(opt.displayFlag).font(.system(.subheadline, design: .monospaced))
+                Text(opt.displayFlag).hackerText().font(.system(.subheadline, design: .monospaced))
                 if let label = opt.argLabel {
                     Text("<\(label)>")
                         .font(.system(.caption, design: .monospaced))
@@ -341,7 +362,10 @@ struct OptionFileRow: View {
             Text(opt.description).font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 TextField("filename", text: $text)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .padding(8)
+                    .background(Color.black.opacity(0.3).cornerRadius(8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.glassBorder, lineWidth: 1))
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .font(.system(.body, design: .monospaced))
@@ -355,7 +379,7 @@ struct OptionFileRow: View {
                     }
                 Button { showPicker = true } label: {
                     Image(systemName: "folder")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(.hackerGreen)
                 }
                 .buttonStyle(.bordered)
             }
@@ -400,7 +424,7 @@ struct PM3FilePicker: View {
                 } label: {
                     HStack {
                         Image(systemName: icon(for: entry.ext))
-                            .foregroundStyle(.green)
+                            .foregroundStyle(.hackerGreen)
                             .frame(width: 22)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(entry.baseName)
@@ -412,7 +436,10 @@ struct PM3FilePicker: View {
                         }
                     }
                 }
+                .listRowBackground(Color.clear)
             }
+            .listStyle(.plain)
+            .hackerBackground()
             .searchable(text: $search, prompt: "Filter files")
             .navigationTitle("Select File")
             .navigationBarTitleDisplayMode(.inline)
@@ -431,6 +458,7 @@ struct PM3FilePicker: View {
             }
             .task { loadFiles() }
         }
+        .preferredColorScheme(.dark)
     }
 
     private func loadFiles() {

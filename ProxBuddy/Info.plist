@@ -18,6 +18,20 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_proxbuddy._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Access the local network to find and connect to the ProxBuddy Bridge proxy.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

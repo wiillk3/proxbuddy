@@ -1,0 +1,87 @@
+# Xcode
+#
+# gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
+
+## User settings
+xcuserdata/
+
+## compatibility with Xcode 8 and earlier (ignoring not required starting Xcode 9)
+*.xcscmblueprint
+*.xccheckout
+
+## compatibility with Xcode 3 and earlier (ignoring not required starting Xcode 4)
+build/
+DerivedData/
+
+## Misc
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+# Swift Package Manager
+.build/
+
+# CocoaPods
+Pods/
+Podfile.lock
+
+# Carthage
+Carthage/Build/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# macOS
+.DS_Store
+
+# ProxBuddy Specific
+# ------------------
+
+# XcodeGen (Project is generated, do not commit)
+*.xcodeproj/
+*.xcworkspace/
+
+# Build scripts / Proxmark3 library outputs
+libpm3client.dylib
+ProxBuddy/libpm3client.dylib
+
+# ProxBuddyBridge (Deprecated / will be removed for PM5)
+ProxBuddyBridge/
+
+# App Data / Logs
+*.log
+*.txt
+*.json
+*.eml
+*.bin
+
+# Exclude any test dumps that might end up in the source tree accidentally
+ProxBuddy/pm3/
+
+# PM3 Dynamic Resources (Copied by build_pm3_ios.sh)
+ProxBuddy/Resources/luascripts/
+ProxBuddy/Resources/lualibs/
+ProxBuddy/Resources/dictionaries/
+ProxBuddy/Resources/pyscripts/
+ProxBuddy/Resources/cmdscripts/
+ProxBuddy/Resources/pm3client
+
+# MockNUS
+MockNUS/
+
+# AI Code
+ProxBuddy/AI/
+ProxBuddy/AIContexts/
+
+# Python Embedded Framework
+ProxBuddy/Python.xcframework/
+ProxBuddy/Resources/python311.zip

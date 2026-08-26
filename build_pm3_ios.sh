@@ -1,13 +1,14 @@
 #!/bin/bash
 # build_pm3_ios.sh
-# Cross-compiles the Iceman/RRG pm3 client for arm64-apple-ios26.
-# Output: ProxBuddy/Resources/pm3client
+# Cross-compiles the Iceman/RRG pm3 client for arm64-apple-ios.
+# Output: ProxBuddy/Resources/libpm3client.dylib
 #
 # Usage:
-#   ./build_pm3_ios.sh [path/to/proxmark3]
+#   ./build_pm3_ios.sh [path/to/proxmark3] [--clean] [--update-pm3-git]
 #
-# Re-runnable: pulls latest source, rebuilds, replaces binary.
+# Re-runnable: rebuilds and replaces binary.
 # Pass --clean to wipe the build cache first.
+# Pass --update-pm3-git to pull latest Iceman source before building.
 #
 # Design notes:
 #   - We do NOT use a CMake toolchain file. The pm3 CMakeLists.txt has an
@@ -16,6 +17,8 @@
 #     Android. Omitting the toolchain file skips this block entirely.
 #   - Instead we pass -DCMAKE_SYSTEM_NAME=iOS plus all compiler/sysroot vars
 #     directly. CMake 3.14+ has native iOS cross-compilation support.
+#   - A git-format patch (patches/ios-shared-lib.patch) converts
+#     add_executable → add_library(SHARED) and injects iOS Python paths.
 #   - bzip2 and lz4 are pre-built for iOS before cmake runs so cmake's
 #     find_package/find_library picks up the iOS statics.
 #   - readline/ncurses are replaced by linenoise (SKIPREADLINE=1).
@@ -25,23 +28,17 @@
 #     the manual SDK patch in doc/md/Installation_Instructions/iOS-*.md.
 set -euo pipefail
 
-# Ensure we always restore the user's CMakeLists.txt even if the script fails midway
-cleanup() {
-    if [ -d "$PM3_SRC/.git" ]; then
-        git -C "$PM3_SRC" restore client/CMakeLists.txt 2>/dev/null || true
-    fi
-}
-trap cleanup EXIT
-
 # ── Args ──────────────────────────────────────────────────────────────────────
 
 CLEAN=0
+UPDATE_GIT=0
 PM3_SRC_ARG=""
 for arg in "$@"; do
     case "$arg" in
-        --clean) CLEAN=1 ;;
-        -*) echo "Unknown flag: $arg"; exit 1 ;;
-        *)  PM3_SRC_ARG="$arg" ;;
+        --clean)          CLEAN=1 ;;
+        --update-pm3-git) UPDATE_GIT=1 ;;
+        -*)               echo "Unknown flag: $arg"; exit 1 ;;
+        *)                PM3_SRC_ARG="$arg" ;;
     esac
 done
 
@@ -49,6 +46,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PM3_SRC="${PM3_SRC_ARG:-/Users/williamkellner/d3v/proxmark/proxmark3}"
 OUTPUT="$SCRIPT_DIR/ProxBuddy/Resources/libpm3client.dylib"
 BUILD_DIR="/tmp/pm3-ios-build"
+
+# Ensure we always restore the upstream CMakeLists.txt even if the script fails
+cleanup() {
+    if [ -d "$PM3_SRC/.git" ]; then
+        git -C "$PM3_SRC" checkout -- client/CMakeLists.txt 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
 
 if [ "$CLEAN" -eq 1 ]; then
     echo "==> Cleaning $BUILD_DIR..."
@@ -76,10 +81,10 @@ CFLAGS="-target ${TRIPLE} -isysroot ${IOS_SDK} -Os -D__IOS_PROHIBITED= -DLIBPM3 
 CXXFLAGS="$CFLAGS -std=c++11"
 LDFLAGS="-target ${TRIPLE} -isysroot ${IOS_SDK}"
 
-# ── Refresh source ────────────────────────────────────────────────────────────
+# ── Optionally refresh source ────────────────────────────────────────────────
 
-if [ -d "$PM3_SRC/.git" ]; then
-    echo "==> Updating Iceman source..."
+if [ "$UPDATE_GIT" -eq 1 ] && [ -d "$PM3_SRC/.git" ]; then
+    echo "==> Updating Iceman source (--update-pm3-git)..."
     git -C "$PM3_SRC" pull --ff-only \
         || echo "warning: git pull failed, continuing with current source"
 fi
@@ -93,8 +98,6 @@ if [ ! -d "$LINENOISE_DIR" ]; then
 fi
 
 # ── Pre-build bzip2 for iOS ───────────────────────────────────────────────────
-# pm3 uses android external bzip2; we build it for iOS ahead of cmake so
-# find_package(BZip2) picks up our iOS static lib instead of the macOS one.
 
 BZIP2_SRC="$BUILD_DIR/bzip2-src"
 BZIP2_LIB="$BUILD_DIR/bzip2-src/libbz2.a"
@@ -134,39 +137,121 @@ if [ ! -f "$LZ4_LIB" ]; then
         liblz4.a
 fi
 
-PYTHON_VER="3.11-b8"
-PYTHON_URL="https://github.com/beeware/Python-Apple-support/releases/download/${PYTHON_VER}/Python-3.11-iOS-support.b8.tar.gz"
+# ── Pre-build OpenSSL for iOS ─────────────────────────────────────────────────
+# Required by mfulc_des_brute helper tool.
+
+OPENSSL_VERSION="3.4.1"
+OPENSSL_SRC="$BUILD_DIR/openssl-src"
+OPENSSL_INSTALL="$BUILD_DIR/openssl-ios"
+OPENSSL_LIB="$OPENSSL_INSTALL/lib/libcrypto.a"
+
+if [ ! -f "$OPENSSL_LIB" ]; then
+    echo "==> Downloading OpenSSL ${OPENSSL_VERSION}..."
+    rm -rf "$OPENSSL_SRC"
+    curl -sL "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
+        -o "$BUILD_DIR/openssl.tar.gz"
+    tar -xzf "$BUILD_DIR/openssl.tar.gz" -C "$BUILD_DIR"
+    mv "$BUILD_DIR/openssl-${OPENSSL_VERSION}" "$OPENSSL_SRC"
+
+    echo "==> Building OpenSSL for iOS arm64 (libcrypto only)..."
+    (
+        cd "$OPENSSL_SRC"
+        # OpenSSL's Configure script has native iOS cross-compilation support
+        ./Configure ios64-xcrun \
+            --prefix="$OPENSSL_INSTALL" \
+            --openssldir="$OPENSSL_INSTALL/ssl" \
+            no-shared no-tests no-ui-console no-engine no-async \
+            -fembed-bitcode \
+            "-isysroot ${IOS_SDK}" \
+            "-mios-version-min=${IOS_TARGET}"
+
+        make -j"$(sysctl -n hw.ncpu)" build_libs
+        make install_dev
+    )
+fi
+
+# ── Python for iOS (BeeWare Python-Apple-support) ─────────────────────────────
+
+PYTHON_VER="3.13-b14"
+PYTHON_MINOR="3.13"
+PYTHON_URL="https://github.com/beeware/Python-Apple-support/releases/download/${PYTHON_VER}/Python-${PYTHON_MINOR}-iOS-support.b14.tar.gz"
 PYTHON_DIR="$BUILD_DIR/python-ios"
 PYTHON_XCFRAMEWORK="$SCRIPT_DIR/ProxBuddy/Python.xcframework"
-PYTHON_STDLIB_ZIP="$SCRIPT_DIR/ProxBuddy/Resources/python311.zip"
+PYTHON_STDLIB_ZIP="$SCRIPT_DIR/ProxBuddy/Resources/python313.zip"
 PYTHON_INC_DIR="$PYTHON_XCFRAMEWORK/ios-arm64/Python.framework/Headers"
 PYTHON_LIB="$PYTHON_XCFRAMEWORK/ios-arm64/Python.framework/Python"
-
-# ── Patch CMakeLists.txt for dylib and Python ────────────────────────────────
-echo "==> Patching CMakeLists.txt to build SHARED library..."
-sed -i '' 's/add_executable(proxmark3/add_library(proxmark3 SHARED/g' "$PM3_SRC/client/CMakeLists.txt"
-echo "==> Patching CMakeLists.txt to force Python for iOS..."
-sed -i '' 's|pkg_search_module(PYTHON3EMBED QUIET ${PYTHON3_PKGCONFIG}-embed)|set(PYTHON3EMBED_FOUND TRUE)\n    set(PYTHON3EMBED_INCLUDE_DIRS "'"${PYTHON_INC_DIR}"'")\n    set(PYTHON3EMBED_LIBRARIES "'"${PYTHON_LIB}"'")\n    set(PYTHON3EMBED_LIBRARY_DIRS "")|g' "$PM3_SRC/client/CMakeLists.txt"
-
-# ── Pre-build Python for iOS ──────────────────────────────────────────────────
-# Download BeeWare Python-Apple-support framework
 
 if [ ! -d "$PYTHON_XCFRAMEWORK" ]; then
     echo "==> Downloading BeeWare Python $PYTHON_VER..."
     mkdir -p "$PYTHON_DIR"
     curl -sL "$PYTHON_URL" -o "$PYTHON_DIR/python.tar.gz"
     tar -xzf "$PYTHON_DIR/python.tar.gz" -C "$PYTHON_DIR"
-    
+
     echo "==> Installing Python.xcframework..."
     cp -R "$PYTHON_DIR/Python.xcframework" "$PYTHON_XCFRAMEWORK"
-    
+
     echo "==> Zipping Python standard library..."
-    # Python can import standard library modules directly from a zip!
     mkdir -p "$SCRIPT_DIR/ProxBuddy/Resources"
     rm -f "$PYTHON_STDLIB_ZIP"
-    (cd "$PYTHON_DIR/Python.xcframework/lib/python3.11" && zip -r -q "$PYTHON_STDLIB_ZIP" .)
+    # Find the stdlib directory — BeeWare layout may vary
+    STDLIB_DIR=""
+    for candidate in \
+        "$PYTHON_DIR/Python.xcframework/ios-arm64/Python.framework/Resources/lib/python${PYTHON_MINOR}" \
+        "$PYTHON_DIR/Python.xcframework/lib/python${PYTHON_MINOR}" \
+        "$PYTHON_DIR/python-stdlib"; do
+        if [ -d "$candidate" ]; then
+            STDLIB_DIR="$candidate"
+            break
+        fi
+    done
+    if [ -z "$STDLIB_DIR" ]; then
+        echo "ERROR: Could not find Python stdlib directory"
+        echo "Contents of Python.xcframework:"
+        find "$PYTHON_DIR/Python.xcframework" -maxdepth 4 -type d
+        exit 1
+    fi
+    echo "==> Found stdlib at: $STDLIB_DIR"
+    (cd "$STDLIB_DIR" && zip -r -q "$PYTHON_STDLIB_ZIP" .)
 fi
 
+# Validate Python include dir exists
+if [ ! -d "$PYTHON_INC_DIR" ]; then
+    echo "ERROR: Python include directory not found at $PYTHON_INC_DIR"
+    echo "Listing xcframework contents:"
+    find "$PYTHON_XCFRAMEWORK" -maxdepth 4 -type d
+    exit 1
+fi
+
+# Validate SWIG wrapper exists
+if [ ! -f "$PM3_SRC/client/src/pm3_pywrap.c" ]; then
+    echo "ERROR: pm3_pywrap.c not found in PM3 source."
+    echo "       Run 'make swig' in the PM3 client directory on a machine with SWIG installed,"
+    echo "       or ensure you have a recent Iceman checkout."
+    exit 1
+fi
+
+# ── Apply iOS patch to CMakeLists.txt ─────────────────────────────────────────
+# Replaces the fragile sed approach — uses a committed patch file with
+# placeholder tokens for Python paths.
+
+echo "==> Applying iOS patch to CMakeLists.txt..."
+PATCH_SRC="$SCRIPT_DIR/patches/ios-shared-lib.patch"
+PATCH_TMP="$BUILD_DIR/ios-shared-lib.patched"
+mkdir -p "$BUILD_DIR"
+
+if [ ! -f "$PATCH_SRC" ]; then
+    echo "ERROR: Patch file not found at $PATCH_SRC"
+    exit 1
+fi
+
+# Substitute Python path placeholders in the patch
+sed -e "s|@PYTHON_INC_DIR@|${PYTHON_INC_DIR}|g" \
+    -e "s|@PYTHON_LIB@|${PYTHON_LIB}|g" \
+    "$PATCH_SRC" > "$PATCH_TMP"
+
+# Apply the patch — will fail loudly if upstream CMakeLists has changed
+git -C "$PM3_SRC" apply "$PATCH_TMP"
+echo "==> Patch applied successfully."
 
 # ── CMake configure ───────────────────────────────────────────────────────────
 # No -DCMAKE_TOOLCHAIN_FILE — that's intentional. See header comment.
@@ -208,6 +293,11 @@ cmake "$PM3_SRC/client" \
     -DLZ4_LIBRARIES="${LZ4_LIB}" \
     2>&1 | tee cmake-configure.log
 
+# Verify Python was detected
+if ! grep -q "HAVE_PYTHON" cmake-configure.log 2>/dev/null; then
+    echo "WARNING: HAVE_PYTHON may not be defined. Check cmake-configure.log."
+fi
+
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 echo "==> Building pm3 client ($(sysctl -n hw.ncpu) jobs)..."
@@ -227,7 +317,8 @@ file "$PM3_BIN"
 
 # ── Strip and copy ────────────────────────────────────────────────────────────
 
-"$IOS_STRIP" "$PM3_BIN" 2>/dev/null || true
+"$IOS_STRIP" "$PM3_BIN" 2>/dev/null \
+    || echo "    (strip skipped — may be unsigned or wrong arch)"
 
 mkdir -p "$(dirname "$OUTPUT")"
 cp "$PM3_BIN" "$OUTPUT"
@@ -248,9 +339,89 @@ for dir in luascripts lualibs dictionaries pyscripts cmdscripts; do
     fi
 done
 
+# ── Install iOS Python shim into pyscripts ────────────────────────────────────
+# Copies pm3_resources_ios.py and patches key scripts to use it on iOS.
+
+IOS_SHIM="$SCRIPT_DIR/ProxBuddy/Resources/pyscripts/pm3_resources_ios.py"
+if [ -f "$IOS_SHIM" ]; then
+    echo "==> Installing iOS Python shim..."
+    cp "$IOS_SHIM" "$PM3_RES_DEST/pyscripts/pm3_resources_ios.py"
+
+    # Inject iOS platform check at the top of scripts that use subprocess
+    IOS_HEADER='import sys as _sys\nif hasattr(_sys, "implementation") and _sys.platform == "ios":\n    from pm3_resources_ios import find_tool, find_dict, run_tool\n    import subprocess as _sp; _sp.run = run_tool\n'
+
+    for script in fm11rf08s_recovery.py fm11rf08s_full.py mfulc_counterfeit_recovery.py; do
+        TARGET="$PM3_RES_DEST/pyscripts/$script"
+        if [ -f "$TARGET" ]; then
+            # Only inject if not already patched
+            if ! grep -q "pm3_resources_ios" "$TARGET" 2>/dev/null; then
+                echo "    Patching $script for iOS..."
+                printf '%b\n' "$IOS_HEADER" | cat - "$TARGET" > "$TARGET.tmp"
+                mv "$TARGET.tmp" "$TARGET"
+            fi
+        fi
+    done
+fi
+
+# ── Cross-compile helper tools for iOS ────────────────────────────────────────
+# These are standalone C tools that pm3 pyscripts call via subprocess.
+# On iOS, subprocess is blocked — so we compile them as dylibs with renamed
+# main() entry points. The pm3_resources_ios.py shim loads them via ctypes.
+
+TOOLS_DIR="$PM3_SRC/tools"
+COMMON_DIR="$PM3_SRC/common"
+TOOLS_OUTPUT="$SCRIPT_DIR/ProxBuddy/Resources/tools"
+mkdir -p "$TOOLS_OUTPUT"
+
+TOOL_CFLAGS="$CFLAGS -I$PM3_SRC/include -I$COMMON_DIR"
+
+# Shared source files for staticnested tools (crapto1 + bucketsort + nested_util)
+CRYPTO_SRCS=(
+    "$COMMON_DIR/crapto1/crypto1.c"
+    "$COMMON_DIR/crapto1/crapto1.c"
+    "$COMMON_DIR/bucketsort.c"
+    "$TOOLS_DIR/mfc/card_only/nested_util.c"
+)
+
+echo ""
+echo "==> Cross-compiling helper tools..."
+
+for tool in staticnested_1nt staticnested_2nt staticnested_0nt \
+            staticnested_2x1nt_rf08s staticnested_2x1nt_rf08s_1key; do
+    echo "    Building lib${tool}.dylib..."
+    "$IOS_CC" $TOOL_CFLAGS -shared -o "$TOOLS_OUTPUT/lib${tool}.dylib" \
+        -Dmain=${tool}_main \
+        "$TOOLS_DIR/mfc/card_only/${tool}.c" \
+        "${CRYPTO_SRCS[@]}" \
+        $LDFLAGS -lpthread 2>&1 || {
+        echo "    WARNING: Failed to build $tool — skipping"
+        continue
+    }
+    "$IOS_STRIP" "$TOOLS_OUTPUT/lib${tool}.dylib" 2>/dev/null || true
+done
+
+# mfulc_des_brute requires OpenSSL (libcrypto)
+if [ -f "$OPENSSL_LIB" ]; then
+    echo "    Building libmfulc_des_brute.dylib..."
+    "$IOS_CC" $TOOL_CFLAGS -shared -o "$TOOLS_OUTPUT/libmfulc_des_brute.dylib" \
+        -Dmain=mfulc_des_brute_main \
+        -I"$OPENSSL_INSTALL/include" \
+        "$TOOLS_DIR/mfulc_des_brute/mfulc_des_brute.c" \
+        $LDFLAGS "$OPENSSL_LIB" -lpthread 2>&1 || {
+        echo "    WARNING: Failed to build mfulc_des_brute — skipping"
+    }
+    "$IOS_STRIP" "$TOOLS_OUTPUT/libmfulc_des_brute.dylib" 2>/dev/null || true
+else
+    echo "    Skipping mfulc_des_brute — OpenSSL not available"
+fi
+
+echo ""
+echo "==> Helper tools built:"
+ls -lh "$TOOLS_OUTPUT/"*.dylib 2>/dev/null || echo "    (none)"
+
+# ── Summary ───────────────────────────────────────────────────────────────────
+
 echo ""
 echo "==> Done. Binary: $OUTPUT"
 echo "==> Build log:    $BUILD_DIR/cmake/build.log"
-
-# ── Cleanup ───────────────────────────────────────────────────────────────────
 echo "==> All done!"

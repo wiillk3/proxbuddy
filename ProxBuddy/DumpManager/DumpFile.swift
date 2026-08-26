@@ -382,7 +382,7 @@ enum PM3HomeSetup {
         // Copy bundle resources on first launch
         let sentinel = pm3Dir.appendingPathComponent(".resources_installed")
         if !fm.fileExists(atPath: sentinel.path) {
-            for name in ["luascripts", "dictionaries", "cmdscripts", "lualibs"] {
+            for name in ["luascripts", "dictionaries", "cmdscripts", "lualibs", "pyscripts"] {
                 if let src = Bundle.main.url(forResource: name, withExtension: nil) {
                     let dst = pm3Dir.appendingPathComponent(name)
                     if !fm.fileExists(atPath: dst.path) { try? fm.copyItem(at: src, to: dst) }
@@ -394,7 +394,7 @@ enum PM3HomeSetup {
 
         // Write pm3 preferences into $HOME/.proxmark3/preferences.json so pm3 saves
         // files to Documents/pm3/ instead of its default $HOME directory.
-        // pm3 uses getenv("HOME") for this lookup — we pass HOME=NSHomeDirectory(),
+        // pm3 uses getenv("HOME") for this lookup — we pass HOME as the Documents directory,
         // so this file lands exactly where pm3 will look for it.
         writePreferences(savePath: pm3Dir.path)
 
@@ -402,8 +402,8 @@ enum PM3HomeSetup {
     }
 
     private static func writePreferences(savePath: String) {
-        let home = URL(fileURLWithPath: NSHomeDirectory())
-        let pm3PrefDir = home.appendingPathComponent(".proxmark3")
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let pm3PrefDir = docs.appendingPathComponent(".proxmark3")
         let prefFile = pm3PrefDir.appendingPathComponent("preferences.json")
         let fm = FileManager.default
         try? fm.createDirectory(at: pm3PrefDir, withIntermediateDirectories: true)

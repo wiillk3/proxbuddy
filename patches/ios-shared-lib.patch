@@ -1,0 +1,28 @@
+--- a/client/CMakeLists.txt
++++ b/client/CMakeLists.txt
+@@ -131,9 +131,13 @@ if (NOT SKIPBT EQUAL 1)
+ endif (NOT SKIPBT EQUAL 1)
+ 
+ if (NOT SKIPPYTHON EQUAL 1)
+-    pkg_search_module(PYTHON3 QUIET ${PYTHON3_PKGCONFIG})
+-    pkg_search_module(PYTHON3EMBED QUIET ${PYTHON3_PKGCONFIG}-embed)
+-endif (NOT SKIPPYTHON EQUAL 1)
++    # iOS: Python paths injected by build_pm3_ios.sh via patch placeholders
++    set(PYTHON3EMBED_FOUND TRUE)
++    set(PYTHON3EMBED_INCLUDE_DIRS "@PYTHON_INC_DIR@")
++    set(PYTHON3EMBED_LIBRARIES "@PYTHON_LIB@")
++    set(PYTHON3EMBED_LIBRARY_DIRS "")
++    set(PYTHON3_FOUND TRUE)
++endif()
+ 
+ # If cross-compiled, we need to init source and build.
+ if (CMAKE_TOOLCHAIN_FILE)
+@@ -773,7 +777,7 @@ message(STATUS "===================================================================")
+ 
+ add_definitions(-DHAVE_SNPRINTF)
+ 
+-add_executable(proxmark3
++add_library(proxmark3 SHARED
+         ${PM3_ROOT}/client/src/proxmark3.c
+         ${TARGET_SOURCES}
+         ${ADDITIONAL_SRC}
