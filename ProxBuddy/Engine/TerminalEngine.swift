@@ -1,17 +1,56 @@
 import Foundation
 import SwiftUI
 
-struct TerminalLine: Identifiable, Sendable {
-    let id = UUID()
+struct TerminalLine: Identifiable, @unchecked Sendable, Equatable {
+    let id: UUID
     let raw: String           // original text with ANSI codes
     let timestamp: Date
     let isInput: Bool
+    let hint: String?
+    let attributedText: AttributedString
+    let nsAttributedText: NSAttributedString
+
+    init(id: UUID = UUID(), raw: String, timestamp: Date, isInput: Bool) {
+        self.id = id
+        self.raw = raw
+        self.timestamp = timestamp
+        self.isInput = isInput
+        self.hint = TerminalLine.extractHint(from: raw)
+        self.attributedText = ANSIParser.parse(
+            raw,
+            fontSize: 13,
+            defaultColor: isInput ? ANSIParser.inputDefault : ANSIParser.outputDefault
+        )
+        self.nsAttributedText = ANSIParser.parseNS(
+            raw,
+            fontSize: 13,
+            defaultColor: isInput ? ANSIParser.inputDefaultUI : ANSIParser.outputDefaultUI
+        )
+    }
+
+    private static func extractHint(from raw: String) -> String? {
+        guard raw.contains("[?]") else { return nil }
+        if let first = raw.firstIndex(of: "`"), let last = raw[raw.index(after: first)...].firstIndex(of: "`") {
+            let cmd = String(raw[raw.index(after: first)..<last])
+            if !cmd.isEmpty { return cmd }
+        }
+        if let first = raw.firstIndex(of: "'"), let last = raw[raw.index(after: first)...].firstIndex(of: "'") {
+            let cmd = String(raw[raw.index(after: first)..<last])
+            if !cmd.isEmpty { return cmd }
+        }
+        return nil
+    }
+
+    static func == (lhs: TerminalLine, rhs: TerminalLine) -> Bool {
+        lhs.id == rhs.id && lhs.raw == rhs.raw && lhs.isInput == rhs.isInput
+    }
 }
 
 @MainActor
 final class TerminalEngine: ObservableObject {
     @Published var lines: [TerminalLine] = []
     @Published var isAutoScrolling = true
+    @Published var pendingInputText: String? = nil
 
     private(set) var history: [String] = []
     private var historyIndex = -1

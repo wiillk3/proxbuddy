@@ -48,6 +48,9 @@ struct ProxBuddyApp: App {
                 .environmentObject(appNav)
                 .environmentObject(scanHistory)
                 .environmentObject(favorites)
+                .onAppear {
+                    KeyboardPrewarmer.prewarm()
+                }
         }
     }
 }
