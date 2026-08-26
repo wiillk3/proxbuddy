@@ -131,6 +131,11 @@ struct TerminalView: View {
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                inputFocused = false
+            }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 5)
                     .onChanged { _ in engine.isAutoScrolling = false }
@@ -182,16 +187,47 @@ struct TerminalView: View {
                 .onSubmit { submitCommand() }
                 .onKeyPress(.upArrow)   { navigateHistory(.up);   return .handled }
                 .onKeyPress(.downArrow) { navigateHistory(.down); return .handled }
+
             if !inputText.isEmpty {
                 Button { submitCommand() } label: {
                     Image(systemName: "return")
                         .foregroundStyle(Color(red: 0.0, green: 0.8, blue: 0.2))
+                }
+                .padding(.trailing, inputFocused ? 8 : 0)
+            }
+
+            if inputFocused {
+                Button {
+                    inputFocused = false
+                } label: {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.gray)
                 }
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(Color(white: 0.05))
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Button { navigateHistory(.up) } label: {
+                    Image(systemName: "arrow.up")
+                }
+                Button { navigateHistory(.down) } label: {
+                    Image(systemName: "arrow.down")
+                }
+                Button("Tab") {
+                    inputText += " "
+                }
+                Spacer()
+                Button("Done") {
+                    inputFocused = false
+                }
+                .fontWeight(.semibold)
+                .foregroundStyle(.green)
+            }
+        }
     }
 
     // MARK: - Helpers

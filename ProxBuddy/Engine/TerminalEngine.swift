@@ -56,6 +56,17 @@ final class TerminalEngine: ObservableObject {
             var skipDisplay = false
 
             let clean = stripAnsi(displayLine)
+            let trimmedClean = clean.trimmingCharacters(in: .whitespaces)
+
+            // Ignore pure spinner or line-clearing erase frames (e.g. "[/]" or spaces)
+            // that PM3 emits between steps, so they don't erase meaningful text.
+            let isBareSpinnerOrEmpty = trimmedClean.isEmpty ||
+                trimmedClean == "[/]" || trimmedClean == "[-]" ||
+                trimmedClean == "[\\]" || trimmedClean == "[|]"
+
+            if isLive && isBareSpinnerOrEmpty {
+                continue
+            }
 
             if captureMode {
                 if isBarePrompt(clean) {
@@ -68,8 +79,7 @@ final class TerminalEngine: ObservableObject {
                     captureContinuation = nil
                     if silent { continue }   // also suppress the prompt line
                 } else {
-                    let trimmed = clean.trimmingCharacters(in: .whitespaces)
-                    if !trimmed.isEmpty { captureBuffer.append(clean) }
+                    if !trimmedClean.isEmpty { captureBuffer.append(clean) }
                     if captureSilent { skipDisplay = true }
                 }
             } else {
@@ -83,8 +93,7 @@ final class TerminalEngine: ObservableObject {
                     }
                     linesSincePrompt.removeAll()
                 } else {
-                    let trimmed = clean.trimmingCharacters(in: .whitespaces)
-                    if !trimmed.isEmpty { linesSincePrompt.append(clean) }
+                    if !trimmedClean.isEmpty { linesSincePrompt.append(clean) }
                 }
             }
 
