@@ -28,6 +28,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Access the local network to find and connect to the ProxBuddy Bridge proxy.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>ProxBuddy uses your location to optionally tag RFID/NFC card dumps with GPS coordinates for spatial analysis.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

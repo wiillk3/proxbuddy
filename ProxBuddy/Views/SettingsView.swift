@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage("builderAutoSwitch") var builderAutoSwitch = true
     @AppStorage("stubCommandFlow") var stubCommandFlow = true
     @AppStorage("stubEmulatorFlow") var stubEmulatorFlow = false
+    @AppStorage("enableGPSLocationTagging") var enableGPS = false
 
     @State private var pm3Version: String = "—"
 
@@ -62,10 +63,27 @@ struct SettingsView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("FILES").hackerText().font(.subheadline).opacity(0.8)
+                        Text("FILES & LOCATION").hackerText().font(.subheadline).opacity(0.8)
                         VStack(alignment: .leading, spacing: 16) {
                             Toggle("Stub emulator commands in terminal", isOn: $stubEmulatorFlow).tint(.hackerGreen)
                             Text("Hides Load to Emulator output from the terminal. Simulate and View Emulator Memory are always handled in the Files tab.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            
+                            Divider().background(Color.glassBorder)
+
+                            Toggle("Tag Dumps with Location (GPS)", isOn: Binding(
+                                get: { enableGPS },
+                                set: { newValue in
+                                    enableGPS = newValue
+                                    if newValue {
+                                        LocationManager.shared.startUpdating()
+                                    } else {
+                                        LocationManager.shared.stopUpdating()
+                                    }
+                                }
+                            )).tint(.hackerGreen)
+                            
+                            Text("Off by default. When enabled, automatically records GPS coordinates, timestamps, and street addresses as sidecar metadata with card dumps.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         .liquidGlassCard()

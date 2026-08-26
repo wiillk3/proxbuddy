@@ -165,6 +165,11 @@ struct DumpGroup: Identifiable {
     let uid: String?
     var files: [DumpFile]
 
+    var location: CardLocation? {
+        guard let file = primaryFile else { return nil }
+        return CardLocation.load(for: file.url)
+    }
+
     var latestDate: Date { files.map(\.modDate).max() ?? .distantPast }
 
     /// Best file for parsing: json > eml > bin dump (not key-only)

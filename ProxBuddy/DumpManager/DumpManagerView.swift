@@ -1,4 +1,5 @@
 import SwiftUI
+import MapKit
 
 // MARK: - ViewModel
 
@@ -40,6 +41,17 @@ final class DumpManagerViewModel: ObservableObject {
                                 size: Int64(r?.fileSize ?? 0))
             }
             .sorted { $0.modDate > $1.modDate }
+
+        // Tag newly detected dumps with GPS coordinates if feature is enabled
+        let enableGPS = UserDefaults.standard.bool(forKey: "enableGPSLocationTagging")
+        if enableGPS {
+            for file in loaded where !lastKnownURLs.contains(file.url) {
+                if CardLocation.load(for: file.url) == nil,
+                   let snapshot = LocationManager.shared.snapshotCurrentLocation() {
+                    snapshot.save(for: file.url)
+                }
+            }
+        }
 
         allFiles = loaded
         groups = DumpGroup.group(loaded)
@@ -187,6 +199,12 @@ struct DumpGroupRow: View {
                             .background(Color.secondary.opacity(0.18))
                             .clipShape(Capsule())
                     }
+                    if let loc = group.location {
+                        Text("📍 \(loc.address ?? "Tagged")")
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.hackerGreen)
+                            .lineLimit(1)
+                    }
                 }
             }
             Spacer()
@@ -212,6 +230,11 @@ struct DumpDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             headerCard.padding(.bottom, 8)
+
+            if let loc = group.location {
+                DumpLocationCard(location: loc)
+                    .padding(.bottom, 8)
+            }
 
             if isLoading {
                 Spacer()
@@ -664,5 +687,57 @@ struct EmulatorMemorySheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - MapKit Dump Location Card
+
+struct DumpLocationCard: View {
+    let location: CardLocation
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("CAPTURE LOCATION", systemImage: "location.fill")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.hackerGreen)
+                Spacer()
+                Text(location.timestamp.formatted(date: .abbreviated, time: .shortened))
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            Map(initialPosition: .region(MKCoordinateRegion(
+                center: location.coordinate,
+                span: MKCoordinateSpan(latitudeDelta: 0.005, longitudeDelta: 0.005)
+            ))) {
+                Marker(location.address ?? "Card Dump Location", coordinate: location.coordinate)
+                    .tint(.hackerGreen)
+            }
+            .frame(height: 120)
+            .cornerRadius(8)
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    if let address = location.address {
+                        Text(address)
+                            .font(.system(.caption, design: .monospaced))
+                            .fontWeight(.medium)
+                            .foregroundStyle(.white)
+                    }
+                    Text(location.formattedCoordinates)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Link(destination: URL(string: "https://maps.apple.com/?q=\(location.latitude),\(location.longitude)")!) {
+                    Label("Maps", systemImage: "arrow.up.right.circle.fill")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.hackerGreen)
+                }
+            }
+        }
+        .liquidGlassCard()
+        .padding(.horizontal, 16)
     }
 }
