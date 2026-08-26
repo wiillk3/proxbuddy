@@ -6,6 +6,7 @@ struct TerminalView: View {
     @EnvironmentObject var deviceManager: DeviceManager
     #if !targetEnvironment(simulator)
     @EnvironmentObject var tcp: TcpTransport
+    @EnvironmentObject var ble: BLETransport
     #endif
 
     @State private var inputText = ""
@@ -199,7 +200,15 @@ struct TerminalView: View {
         #if targetEnvironment(simulator)
         return .green
         #else
-        return tcp.isReady ? .green : .yellow
+        if let session = deviceManager.activeSession {
+            switch session.selectedTransportMode {
+            case .ble:
+                return (ble.connectionState == .ready && session.isRunning) ? .green : .yellow
+            case .wifiDirect, .bridge:
+                return (tcp.isReady && session.isRunning) ? .green : .yellow
+            }
+        }
+        return .yellow
         #endif
     }
 
@@ -207,6 +216,9 @@ struct TerminalView: View {
         #if targetEnvironment(simulator)
         return "USB direct"
         #else
+        if let session = deviceManager.activeSession {
+            return session.statusMessage
+        }
         return tcp.statusMessage
         #endif
     }

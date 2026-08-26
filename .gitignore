@@ -74,6 +74,8 @@ ProxBuddy/Resources/dictionaries/
 ProxBuddy/Resources/pyscripts/
 ProxBuddy/Resources/cmdscripts/
 ProxBuddy/Resources/pm3client
+ProxBuddy/Resources/tools/
+*.dylib
 
 # MockNUS
 MockNUS/

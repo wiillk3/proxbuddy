@@ -203,8 +203,6 @@ final class BinaryRunner: ObservableObject {
 
         // Use Swift concurrency to wait for the local socket to accept without blocking the main thread
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let acceptReadySema = DispatchSemaphore(value: 0)
-            
             // Start local accept thread
             Thread { [weak self] in
                 var clientAddr = sockaddr()
@@ -216,11 +214,6 @@ final class BinaryRunner: ObservableObject {
                     if fd >= 0 {
                         self?.portMasterFD = fd
                         continuation.resume()
-                        // Allow the main thread to run its next loop (which attaches the transport)
-                        // before signaling the C worker thread to start communicating.
-                        DispatchQueue.main.async {
-                            acceptReadySema.signal()
-                        }
                     } else {
                         continuation.resume(throwing: RunnerError.pipeFailed)
                     }
@@ -228,10 +221,8 @@ final class BinaryRunner: ObservableObject {
             }.start()
 
             let thread = Thread { [weak self] in
-                // Wait until Swift has fully attached the transport relay
-                acceptReadySema.wait()
-
                 // Open the C client, pointing it to our local TCP loopback
+                // This connect() will unblock the Darwin.accept thread above
                 let dev = pm3Open(connectionString)
 
                 // Print the initial prompt so the UI and capture logic knows it's ready

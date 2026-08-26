@@ -20,7 +20,9 @@ struct ContentView: View {
             if deviceManager.sessions.isEmpty {
                 deviceManager.addSession(label: "PM5 1")
             }
+            #if targetEnvironment(simulator)
             if let s = deviceManager.activeSession { await s.boot(scanHistory: scanHistory) }
+            #endif
         }
         .alert("Launch Error", isPresented: .constant(launchError != nil)) {
             Button("OK") { launchError = nil }

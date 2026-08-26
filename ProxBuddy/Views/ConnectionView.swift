@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 struct DevicesView: View {
     @EnvironmentObject var deviceManager: DeviceManager
@@ -14,13 +15,19 @@ struct DevicesView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     ForEach(deviceManager.sessions) { session in
-                        sessionSection(session)
+                        SessionCardView(
+                            session: session,
+                            editingLabel: $editingLabel,
+                            labelDraft: $labelDraft,
+                            showingInfoSession: $showingInfoSession
+                        )
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
                         Button {
-                            let s = deviceManager.addSession()
-                            Task { await s.boot(scanHistory: scanHistory) }
+                            _ = deviceManager.addSession()
+                            // BLE sessions connect & boot via the scanner UI;
+                            // non-BLE sessions would boot here but BLE is the default.
                         } label: {
                             Label("Add Device", systemImage: "plus.circle.fill")
                                 .foregroundStyle(.hackerGreen)
@@ -36,15 +43,28 @@ struct DevicesView: View {
             .navigationTitle("Devices & PM5")
             .navigationBarTitleDisplayMode(.large)
         }
+        .sheet(item: $showingInfoSession) { sess in
+            DeviceInfoSheet(session: sess)
+        }
         .preferredColorScheme(.dark)
     }
+}
 
-    // MARK: - Per-session section
+// MARK: - Per-session Card View
 
-    @ViewBuilder
-    private func sessionSection(_ session: PM3Session) -> some View {
-        let isActive = deviceManager.activeSession?.id == session.id
+private struct SessionCardView: View {
+    @ObservedObject var session: PM3Session
+    @EnvironmentObject var deviceManager: DeviceManager
+    @EnvironmentObject var scanHistory:   ScanHistoryStore
+    @Binding var editingLabel: UUID?
+    @Binding var labelDraft: String
+    @Binding var showingInfoSession: PM3Session?
 
+    private var isActive: Bool {
+        deviceManager.activeSession?.id == session.id
+    }
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(session.label.uppercased())
                 .hackerText()
@@ -144,53 +164,7 @@ struct DevicesView: View {
 
                 // BLE Connection / Scanner Details
                 if case .ble = session.selectedTransportMode {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("BLE Scanner").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
-                            Spacer()
-                            Button {
-                                if session.bleTransport.connectionState == .scanning {
-                                    session.bleTransport.stopScanning()
-                                } else {
-                                    session.bleTransport.startScanning()
-                                }
-                            } label: {
-                                Label(
-                                    session.bleTransport.connectionState == .scanning ? "Scanning…" : "Scan Nearby",
-                                    systemImage: "radiowaves.right"
-                                )
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.hackerGreen)
-                            }
-                        }
-
-                        if !session.bleTransport.discoveredPeripherals.isEmpty {
-                            VStack(spacing: 6) {
-                                ForEach(session.bleTransport.discoveredPeripherals) { discovered in
-                                    HStack {
-                                        VStack(alignment: .leading) {
-                                            Text(discovered.name)
-                                                .font(.system(.footnote, design: .monospaced))
-                                                .foregroundStyle(.white)
-                                            Text("RSSI: \(discovered.rssi) dBm")
-                                                .font(.system(.caption2, design: .monospaced))
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        Button("Connect") {
-                                            session.bleTransport.connect(to: discovered)
-                                        }
-                                        .font(.system(.caption, design: .monospaced))
-                                        .buttonStyle(.borderedProminent)
-                                        .tint(.hackerGreen)
-                                    }
-                                    .padding(8)
-                                    .background(Color.black.opacity(0.3))
-                                    .cornerRadius(6)
-                                }
-                            }
-                        }
-                    }
+                    BLEScannerSection(session: session, scanHistory: scanHistory)
                 }
 
                 Divider().background(Color.glassBorder)
@@ -252,9 +226,6 @@ struct DevicesView: View {
             }
             .liquidGlassCard()
         }
-        .sheet(item: $showingInfoSession) { sess in
-            DeviceInfoSheet(session: sess)
-        }
     }
 
     private func batteryIcon(for level: Int) -> String {
@@ -266,6 +237,171 @@ struct DevicesView: View {
         }
     }
 }
+
+// MARK: - BLE Scanner Section
+
+#if !targetEnvironment(simulator)
+private struct BLEScannerSection: View {
+    @ObservedObject var session: PM3Session
+    @ObservedObject var ble: BLETransport
+    var scanHistory: ScanHistoryStore
+
+    init(session: PM3Session, scanHistory: ScanHistoryStore) {
+        self.session = session
+        self.scanHistory = scanHistory
+        self.ble = session.bleTransport
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header + scan toggle
+            HStack {
+                Text("BLE SCANNER")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                stateLabel
+            }
+
+            // Already connected — show name + disconnect option
+            if ble.connectionState == .ready, let name = ble.connectedPeripheralName {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.hackerGreen)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name)
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundStyle(.white)
+                        Text("BLE connected · pm3 running")
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Disconnect") {
+                        session.bleTransport.disconnect()
+                        session.runner.terminate()
+                    }
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.red)
+                }
+                .padding(8)
+                .background(Color.hackerGreen.opacity(0.08))
+                .cornerRadius(6)
+
+            } else if ble.connectionState == .connecting || ble.connectionState == .discoveringServices {
+                // In-progress connection indicator
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .tint(.hackerGreen)
+                        .scaleEffect(0.8)
+                    Text(ble.connectionState == .connecting ? "Connecting…" : "Discovering services…")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+
+            } else {
+                // Scan controls
+                HStack {
+                    Spacer()
+                    Button {
+                        if ble.connectionState == .scanning {
+                            ble.stopScanning()
+                        } else {
+                            ble.startScanning()
+                        }
+                    } label: {
+                        Label(
+                            ble.connectionState == .scanning ? "Stop" : "Scan Nearby",
+                            systemImage: ble.connectionState == .scanning ? "stop.circle" : "antenna.radiowaves.left.and.right"
+                        )
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(ble.connectionState == .scanning ? .red : .hackerGreen)
+                    }
+                }
+
+                if ble.connectionState == .scanning && ble.discoveredPeripherals.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .tint(.hackerGreen)
+                            .scaleEffect(0.7)
+                        Text("Scanning for PM5 devices…")
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if !ble.discoveredPeripherals.isEmpty {
+                    VStack(spacing: 6) {
+                        ForEach(ble.discoveredPeripherals) { discovered in
+                            HStack(spacing: 10) {
+                                Image(systemName: "wave.3.right")
+                                    .foregroundStyle(.hackerGreen)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(discovered.name)
+                                        .font(.system(.footnote, design: .monospaced))
+                                        .foregroundStyle(.white)
+                                    Text("RSSI: \(discovered.rssi) dBm")
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Connect") {
+                                    Task {
+                                        await session.connectBLEAndBoot(
+                                            to: discovered,
+                                            scanHistory: scanHistory
+                                        )
+                                    }
+                                }
+                                .font(.system(.caption, design: .monospaced))
+                                .buttonStyle(.borderedProminent)
+                                .tint(.hackerGreen)
+                            }
+                            .padding(8)
+                            .background(Color.black.opacity(0.3))
+                            .cornerRadius(6)
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear {
+            // Auto-start scanning when the user opens a BLE session
+            // (only if BT is on and not already connected/scanning)
+            let state = ble.connectionState
+            if state == .disconnected || state == .error {
+                ble.startScanning()
+            }
+        }
+        .onDisappear {
+            // Stop scanning to save battery when navigating away
+            if ble.connectionState == .scanning {
+                ble.stopScanning()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var stateLabel: some View {
+        let (label, color): (String, Color) = {
+            switch ble.connectionState {
+            case .disconnected:   return ("OFFLINE", .secondary)
+            case .scanning:       return ("SCANNING", .orange)
+            case .connecting:     return ("CONNECTING", .yellow)
+            case .discoveringServices: return ("NEGOTIATING", .yellow)
+            case .ready:          return ("CONNECTED", .hackerGreen)
+            case .error:          return ("ERROR", .red)
+            }
+        }()
+        Text(label)
+            .font(.system(.caption2, design: .monospaced))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(color.opacity(0.15))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
+    }
+}
+#endif
 
 // MARK: - Device Info & Hardware Specs Sheet
 

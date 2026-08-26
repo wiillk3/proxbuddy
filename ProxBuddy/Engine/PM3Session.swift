@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 enum TransportMode: Hashable, Identifiable {
     case ble
@@ -30,7 +31,16 @@ final class PM3Session: ObservableObject, Identifiable {
     var transport: TcpTransport { tcpTransport }
     #endif
 
-    init(label: String) { self.label = label }
+    private var cancellables = Set<AnyCancellable>()
+
+    init(label: String) {
+        self.label = label
+        runner.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
+        #if !targetEnvironment(simulator)
+        bleTransport.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
+        tcpTransport.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
+        #endif
+    }
 
     // MARK: - Status
 
@@ -56,7 +66,12 @@ final class PM3Session: ObservableObject, Identifiable {
         return nil
     }
 
-    var isTransportReady: Bool { true }
+    var isTransportReady: Bool {
+        switch selectedTransportMode {
+        case .ble: return bleTransport.connectionState == .ready
+        case .wifiDirect, .bridge: return true
+        }
+    }
     #else
     var statusMessage: String { runner.isRunning ? "USB direct (sim)" : "Stopped" }
     var batteryLevel: Int? { nil }
@@ -65,6 +80,7 @@ final class PM3Session: ObservableObject, Identifiable {
 
     // MARK: - Lifecycle
 
+    /// Full boot — for BLE mode this is called only after BLE reaches .ready.
     func boot(scanHistory: ScanHistoryStore) async {
         engine.scanHistory = scanHistory
         runner.resetStream()
@@ -81,17 +97,15 @@ final class PM3Session: ObservableObject, Identifiable {
         Task { await engine.connect(to: runner) }
 
         #else
-        let bundledURL = Bundle.main.url(forResource: "libpm3client", withExtension: "dylib", subdirectory: "Frameworks") 
+        let bundledURL = Bundle.main.url(forResource: "libpm3client", withExtension: "dylib", subdirectory: "Frameworks")
             ?? Bundle.main.url(forResource: "libpm3client", withExtension: "dylib")
-        let binaryInUse = bundledURL?.path ?? "none"
-        engine.append(raw: "[=] boot: \(binaryInUse)", isInput: false)
+        engine.append(raw: "[=] boot: \(bundledURL?.path ?? "none")", isInput: false)
         do {
             try await runner.launch()
         } catch {
             engine.append(raw: "[!] boot: launch failed — \(error.localizedDescription)", isInput: false)
             return
         }
-        // Attach active transport relay to the port pair BinaryRunner created
         if runner.portMasterFD >= 0 {
             switch selectedTransportMode {
             case .ble:
@@ -108,9 +122,37 @@ final class PM3Session: ObservableObject, Identifiable {
         #endif
     }
 
+    /// For BLE mode: connect to a scanned peripheral, wait for service discovery to
+    /// complete (.ready), then boot pm3 client so the relay is wired up correctly.
+    #if !targetEnvironment(simulator)
+    func connectBLEAndBoot(to discovered: DiscoveredPeripheral, scanHistory: ScanHistoryStore) async {
+        bleTransport.connect(to: discovered)
+        // Wait until BLE reaches .ready or .error / .disconnected
+        for await state in bleTransport.connectionEvents {
+            if state == .ready {
+                break
+            } else if state == .error || state == .disconnected {
+                engine.append(raw: "[!] BLE connect failed: \(state.rawValue)", isInput: false)
+                return
+            }
+        }
+        // PM3 client boots now, with BLE already attached
+        await boot(scanHistory: scanHistory)
+    }
+    #endif
+
     /// Terminate the running client (if any) then boot fresh.
     func restart(scanHistory: ScanHistoryStore) async {
         runner.terminate()
+        #if !targetEnvironment(simulator)
+        if case .ble = selectedTransportMode {
+            // For BLE, only re-boot if still connected
+            if bleTransport.connectionState == .ready {
+                await boot(scanHistory: scanHistory)
+            }
+            return
+        }
+        #endif
         await boot(scanHistory: scanHistory)
     }
 

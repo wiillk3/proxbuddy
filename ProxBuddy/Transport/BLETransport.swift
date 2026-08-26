@@ -102,9 +102,11 @@ final class BLETransport: NSObject, ObservableObject {
     func startScanning() {
         discoveredPeripherals = []
         connectionState = .scanning
+        // Scan for ALL peripherals — the PM5 may not advertise our specific service
+        // UUIDs in its advertisement packet. We filter by name on discovery instead.
         centralManager.scanForPeripherals(
-            withServices: [PM5BLE.sppServiceUUID, PM5BLE.batteryServiceUUID, PM5BLE.nusServiceUUID],
-            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+            withServices: nil,
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
         )
     }
 
@@ -134,6 +136,7 @@ extension BLETransport: CBCentralManagerDelegate {
         MainActor.assumeIsolated {
             if central.state != .poweredOn && connectionState != .disconnected {
                 connectionState = .error
+                _ = connectionContinuation.yield(.error)
             }
         }
     }
@@ -146,12 +149,28 @@ extension BLETransport: CBCentralManagerDelegate {
     ) {
         let name = peripheral.name
             ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String
-            ?? "Proxmark5"
+            ?? ""
         let id   = peripheral.identifier
         let rssi = RSSI.intValue
 
+        let serviceUUIDs = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
+        let hasMatchingService = serviceUUIDs.contains(where: {
+            $0 == PM5BLE.sppServiceUUID || $0 == PM5BLE.nusServiceUUID || $0.uuidString.uppercased().contains("AE86")
+        })
+
+        let isPM5Candidate = name.lowercased().contains("proxmark")
+            || name.lowercased().contains("pm5")
+            || name.lowercased().contains("pm3")
+            || name.lowercased().contains("iceman")
+            || name.lowercased().contains("bwm")
+
+        // Strictly show only PM5/Proxmark devices or devices advertising PM5 SPP service
+        guard hasMatchingService || isPM5Candidate else { return }
+
+        let displayName = name.isEmpty ? "Proxmark5" : name
+
         MainActor.assumeIsolated {
-            let discovered = DiscoveredPeripheral(id: id, name: name, rssi: rssi, peripheral: peripheral)
+            let discovered = DiscoveredPeripheral(id: id, name: displayName, rssi: rssi, peripheral: peripheral)
             if let idx = discoveredPeripherals.firstIndex(where: { $0.id == id }) {
                 discoveredPeripherals[idx] = discovered
             } else {
@@ -165,7 +184,7 @@ extension BLETransport: CBCentralManagerDelegate {
             connectionState = .discoveringServices
             connectedPeripheralName = peripheral.name ?? "Proxmark5"
             peripheral.delegate = self
-            peripheral.discoverServices([PM5BLE.sppServiceUUID, PM5BLE.batteryServiceUUID, PM5BLE.nusServiceUUID])
+            peripheral.discoverServices(nil)
         }
     }
 
@@ -177,6 +196,7 @@ extension BLETransport: CBCentralManagerDelegate {
         MainActor.assumeIsolated {
             connectionState = .error
             connectedPeripheral = nil
+            _ = connectionContinuation.yield(.error)
         }
     }
 
@@ -207,18 +227,15 @@ extension BLETransport: CBCentralManagerDelegate {
 extension BLETransport: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard error == nil, let services = peripheral.services else {
-            MainActor.assumeIsolated { connectionState = .error }
+            MainActor.assumeIsolated {
+                connectionState = .error
+                _ = connectionContinuation.yield(.error)
+            }
             return
         }
 
         for service in services {
-            if service.uuid == PM5BLE.sppServiceUUID {
-                peripheral.discoverCharacteristics([PM5BLE.sppDataCharUUID], for: service)
-            } else if service.uuid == PM5BLE.batteryServiceUUID {
-                peripheral.discoverCharacteristics([PM5BLE.batteryLevelCharUUID], for: service)
-            } else if service.uuid == PM5BLE.nusServiceUUID {
-                peripheral.discoverCharacteristics([PM5BLE.nusTxCharUUID, PM5BLE.nusRxCharUUID], for: service)
-            }
+            peripheral.discoverCharacteristics(nil, for: service)
         }
     }
 
@@ -230,10 +247,11 @@ extension BLETransport: CBPeripheralDelegate {
         guard error == nil, let characteristics = service.characteristics else { return }
 
         for char in characteristics {
-            if char.uuid == PM5BLE.sppDataCharUUID {
+            let uStr = char.uuid.uuidString.uppercased()
+            if char.uuid == PM5BLE.sppDataCharUUID || uStr.contains("AE88") {
                 peripheral.setNotifyValue(true, for: char)
                 MainActor.assumeIsolated { dataCharacteristic = char }
-            } else if char.uuid == PM5BLE.batteryLevelCharUUID {
+            } else if char.uuid == PM5BLE.batteryLevelCharUUID || uStr.contains("2A19") {
                 peripheral.setNotifyValue(true, for: char)
                 peripheral.readValue(for: char)
                 MainActor.assumeIsolated { batteryCharacteristic = char }
@@ -249,8 +267,10 @@ extension BLETransport: CBPeripheralDelegate {
         MainActor.assumeIsolated {
             if dataCharacteristic != nil || (nusTxCharacteristic != nil && nusRxCharacteristic != nil) {
                 negotiatedMTU = max(20, payloadMTU + 3)
-                connectionState = .ready
-                _ = connectionContinuation.yield(.ready)
+                if connectionState != .ready {
+                    connectionState = .ready
+                    _ = connectionContinuation.yield(.ready)
+                }
             }
         }
     }
