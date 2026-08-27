@@ -15,30 +15,37 @@ struct ProxBuddyApp: App {
     @StateObject private var favorites     = FavoritesStore()
 
     init() {
-        // BeeWare's Python.framework lives in Frameworks/
-        // Python expects PYTHONHOME to point at the framework root
-        // which contains Resources/lib/python3.13/
-        if let fwPath = Bundle.main.privateFrameworksPath {
-            let pythonFW = (fwPath as NSString).appendingPathComponent("Python.framework")
-            setenv("PYTHONHOME", pythonFW, 1)
-        } else {
-            setenv("PYTHONHOME", Bundle.main.bundlePath, 1)
+        // iOS does not export LANG; CPython uses it during locale/codec setup.
+        if getenv("LANG") == nil {
+            setenv("LANG", "en_US.UTF-8", 1)
         }
 
-        // PYTHONPATH: stdlib zip + bundle pyscripts
-        var paths: [String] = []
-        if let zip = Bundle.main.url(forResource: "python313", withExtension: "zip") {
-            paths.append(zip.path)
+        // BeeWare install_python (Xcode build phase) copies stdlib into
+        // <App>.app/python/lib/python3.11 and rewrites lib-dynload .so files
+        // into Frameworks/*.framework + .fwork stubs. CPython bootstraps
+        // encodings from PYTHONHOME *before* PYTHONPATH is applied, so this
+        // layout has to match getpath's {home}/lib/python3.11 exactly.
+        let resourcePath = Bundle.main.resourcePath ?? ""
+        let pyHome = (resourcePath as NSString).appendingPathComponent("python")
+        let pyStdLib = (pyHome as NSString).appendingPathComponent("lib/python3.11")
+        let dynLoad = (pyStdLib as NSString).appendingPathComponent("lib-dynload")
+        let encodingsInit = (pyStdLib as NSString).appendingPathComponent("encodings/__init__.py")
+
+        if !FileManager.default.fileExists(atPath: encodingsInit) {
+            NSLog("[ProxBuddy] Python stdlib missing at \(pyStdLib). The 'Install Python stdlib' build phase did not run — regenerate the Xcode project with xcodegen and rebuild.")
         }
+
+        setenv("PYTHONHOME", pyHome, 1)
+        setenv("PYTHONUTF8", "1", 1)
+        setenv("PYTHONIOENCODING", "utf-8", 1)
+        setenv("PYTHONDONTWRITEBYTECODE", "1", 1)
+        setenv("PYTHONUNBUFFERED", "1", 1)
+
+        var paths = [pyStdLib, dynLoad]
         if let pyscripts = Bundle.main.url(forResource: "pyscripts", withExtension: nil) {
             paths.append(pyscripts.path)
         }
-        if !paths.isEmpty {
-            setenv("PYTHONPATH", paths.joined(separator: ":"), 1)
-        }
-
-        // Prevent .pyc writes into read-only bundle
-        setenv("PYTHONDONTWRITEBYTECODE", "1", 1)
+        setenv("PYTHONPATH", paths.joined(separator: ":"), 1)
     }
 
     var body: some Scene {

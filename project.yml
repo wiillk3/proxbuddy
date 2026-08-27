@@ -47,8 +47,19 @@ targets:
       - path: ProxBuddy/Resources/dictionaries
         type: folder
 
-    resources:
-      - path: ProxBuddy/Resources/python313.zip
+    # BeeWare's XCFramework is only the libPython dylib. Stdlib + lib-dynload
+    # must be copied into the .app (and .so files rewritten as frameworks)
+    # before embed/sign. See Python.xcframework/build/utils.sh.
+    postCompileScripts:
+      - name: Install Python stdlib
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          source "$PROJECT_DIR/ProxBuddy/Python.xcframework/build/utils.sh"
+          install_python ProxBuddy/Python.xcframework
+          # Override iOS os_log stdout so script print() hits the captured C fds.
+          cp "$PROJECT_DIR/ProxBuddy/Resources/sitecustomize.py" \
+             "$CODESIGNING_FOLDER_PATH/python/lib/python3.11/sitecustomize.py"
 
     info:
       path: ProxBuddy/Info.plist
