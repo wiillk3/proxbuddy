@@ -20,7 +20,13 @@ enum TransportMode: Hashable, Identifiable {
 final class PM3Session: ObservableObject, Identifiable {
     let id = UUID()
     @Published var label: String
-    @Published var selectedTransportMode: TransportMode = .ble
+    @Published var selectedTransportMode: TransportMode = .ble {
+        didSet { refreshDerivedStatus() }
+    }
+    @Published private(set) var isRunning = false
+    @Published private(set) var statusMessage = "Stopped"
+    @Published private(set) var batteryLevel: Int? = nil
+    @Published private(set) var isTransportReady = false
 
     let runner = BinaryRunner()
     let engine = TerminalEngine()
@@ -35,48 +41,62 @@ final class PM3Session: ObservableObject, Identifiable {
 
     init(label: String) {
         self.label = label
-        runner.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
+        runner.$isRunning
+            .sink { [weak self] _ in self?.refreshDerivedStatus() }
+            .store(in: &cancellables)
         #if !targetEnvironment(simulator)
-        bleTransport.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
-        tcpTransport.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
+        bleTransport.$connectionState
+            .sink { [weak self] _ in self?.refreshDerivedStatus() }
+            .store(in: &cancellables)
+        bleTransport.$connectedPeripheralName
+            .sink { [weak self] _ in self?.refreshDerivedStatus() }
+            .store(in: &cancellables)
+        bleTransport.$batteryLevel
+            .sink { [weak self] _ in self?.refreshDerivedStatus() }
+            .store(in: &cancellables)
+        tcpTransport.$isReady
+            .sink { [weak self] _ in self?.refreshDerivedStatus() }
+            .store(in: &cancellables)
+        tcpTransport.$statusMessage
+            .sink { [weak self] _ in self?.refreshDerivedStatus() }
+            .store(in: &cancellables)
         #endif
+        refreshDerivedStatus()
     }
 
     // MARK: - Status
 
-    var isRunning: Bool { runner.isRunning }
-
-    #if !targetEnvironment(simulator)
-    var statusMessage: String {
+    private func refreshDerivedStatus() {
+        let running = runner.isRunning
+        if isRunning != running { isRunning = running }
+        #if targetEnvironment(simulator)
+        let nextStatus = running ? "USB direct (sim)" : "Stopped"
+        if statusMessage != nextStatus { statusMessage = nextStatus }
+        if batteryLevel != nil { batteryLevel = nil }
+        if isTransportReady != true { isTransportReady = true }
+        #else
+        let nextStatus: String
+        let nextReady: Bool
+        let nextBattery: Int?
         switch selectedTransportMode {
         case .ble:
             if let name = bleTransport.connectedPeripheralName {
-                return "BLE: \(name) (\(bleTransport.connectionState.rawValue))"
+                nextStatus = "BLE: \(name) (\(bleTransport.connectionState.rawValue))"
+            } else {
+                nextStatus = "BLE: \(bleTransport.connectionState.rawValue)"
             }
-            return "BLE: \(bleTransport.connectionState.rawValue)"
+            nextReady = bleTransport.connectionState == .ready
+            nextBattery = bleTransport.batteryLevel
         case .wifiDirect, .bridge:
-            return tcpTransport.statusMessage
+            nextStatus = tcpTransport.statusMessage
+            nextReady = true
+            nextBattery = nil
         }
+        if statusMessage != nextStatus { statusMessage = nextStatus }
+        if isTransportReady != nextReady { isTransportReady = nextReady }
+        if batteryLevel != nextBattery { batteryLevel = nextBattery }
+        #endif
     }
-
-    var batteryLevel: Int? {
-        if case .ble = selectedTransportMode {
-            return bleTransport.batteryLevel
-        }
-        return nil
-    }
-
-    var isTransportReady: Bool {
-        switch selectedTransportMode {
-        case .ble: return bleTransport.connectionState == .ready
-        case .wifiDirect, .bridge: return true
-        }
-    }
-    #else
-    var statusMessage: String { runner.isRunning ? "USB direct (sim)" : "Stopped" }
-    var batteryLevel: Int? { nil }
-    var isTransportReady: Bool { true }
-    #endif
 
     // MARK: - Lifecycle
 

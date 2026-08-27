@@ -10,6 +10,24 @@ struct ANSIParser {
     static let inputDefault  = Color(red: 0.0, green: 0.8, blue: 0.2)
     static let inputDefaultUI = UIColor(red: 0.0, green: 0.8, blue: 0.2, alpha: 1.0)
 
+    private static let stripRegex: NSRegularExpression = {
+        try! NSRegularExpression(pattern: "\u{1B}\\[[0-9;]*[a-zA-Z]")
+    }()
+
+    private static let pm3PrefixRegex: NSRegularExpression = {
+        try! NSRegularExpression(pattern: "^\\[.\\]\\s*")
+    }()
+
+    static func strip(_ s: String) -> String {
+        let range = NSRange(s.startIndex..., in: s)
+        return stripRegex.stringByReplacingMatches(in: s, options: [], range: range, withTemplate: "")
+    }
+
+    static func stripPM3Prefix(_ s: String) -> String {
+        let range = NSRange(s.startIndex..., in: s)
+        return pm3PrefixRegex.stringByReplacingMatches(in: s, options: [], range: range, withTemplate: "")
+    }
+
     static func parse(_ raw: String,
                       fontSize: CGFloat = 13,
                       defaultColor: Color = outputDefault) -> AttributedString {

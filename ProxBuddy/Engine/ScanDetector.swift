@@ -122,8 +122,7 @@ enum ScanDetector {
     // MARK: - Utilities
 
     private static func stripAnsi(_ s: String) -> String {
-        s.replacingOccurrences(of: #"\x1B\[[0-9;]*[a-zA-Z]"#, with: "",
-                               options: .regularExpression)
+        ANSIParser.strip(s)
     }
 
     private static func extractValue(after key: String, in line: String) -> String {

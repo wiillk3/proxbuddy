@@ -1,21 +1,48 @@
 import SwiftUI
+import Observation
+import UIKit
+import os
 
+private let builderSignposter = OSSignposter(subsystem: "rfid.spot.proxbuddy", category: "CommandBuilder")
+
+/// Per-option state as its own observable, so flipping one toggle doesn't
+/// invalidate every other row (a `[UUID: Bool]` on the VM would).
+@Observable
 @MainActor
-final class CommandBuilderViewModel: ObservableObject {
-    @Published var baseCommand: String
-    @Published var commandHelp: CommandHelp?
-    @Published var isLoading = false
-    @Published var error: String?
-    @Published var bools: [UUID: Bool] = [:]
-    @Published var strings: [UUID: String] = [:]
-    @Published var commandText: String   // single live-editable command string
+final class OptionValue {
+    var isOn = false
+    var text = ""
+}
+
+@Observable
+@MainActor
+final class CommandBuilderViewModel {
+    var baseCommand: String
+    var commandHelp: CommandHelp?
+    var isLoading = false
+    var error: String?
+    var commandText: String
+    var isSendable = false
+    var isStarred = false
 
     let engine: TerminalEngine
+    @ObservationIgnored weak var favorites: FavoritesStore?
+
+    @ObservationIgnored private var values: [UUID: OptionValue] = [:]
+    @ObservationIgnored private var suppressParse = false
 
     init(engine: TerminalEngine, initialCommand: String = "") {
         self.engine = engine
         self.baseCommand = initialCommand
         self.commandText = initialCommand
+        self.isSendable = !initialCommand.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    func value(for id: UUID) -> OptionValue {
+        if let existing = values[id] { return existing }
+        let created = OptionValue()
+        values[id] = created
+        return created
     }
 
     func loadHelp() async {
@@ -30,16 +57,15 @@ final class CommandBuilderViewModel: ObservableObject {
         if !help.hasContent {
             error = "No help text found — type arguments manually or check the command."
         } else {
+            values.removeAll()
             commandHelp = help
-            bools = [:]
-            strings = [:]
             commandText = priorText.hasPrefix(cmd) ? priorText : cmd
+            updateDerived()
             syncFromText()
         }
         isLoading = false
     }
 
-    /// Native client prefers `--help`; Lua/user scripts usually only implement `-h`.
     private func probeHelp(for cmd: String) async -> CommandHelp {
         let isScript = cmd.lowercased().hasPrefix("script ")
         let stub = UserDefaults.standard.object(forKey: "stubCommandFlow") as? Bool ?? true
@@ -62,28 +88,52 @@ final class CommandBuilderViewModel: ObservableObject {
         return best
     }
 
-    // Rebuild commandText from current option state — called after every option row change
+    func handleExternalCommandEdit() {
+        if suppressParse {
+            suppressParse = false
+            return
+        }
+        syncFromText()
+    }
+
+    func updateDerived() {
+        let trimmed = commandText.trimmingCharacters(in: .whitespaces)
+        let sendable = !trimmed.isEmpty
+        if isSendable != sendable { isSendable = sendable }
+        let starred = favorites?.isFavorited(command: trimmed) ?? false
+        if isStarred != starred { isStarred = starred }
+    }
+
     func syncToText() {
+        let state = builderSignposter.beginInterval("syncToText")
+        defer { builderSignposter.endInterval("syncToText", state) }
         var parts = [baseCommand.trimmingCharacters(in: .whitespaces)]
-        guard let help = commandHelp else { commandText = parts[0]; return }
-        for opt in help.options where opt.primaryFlag != "--help" {
+        guard let help = commandHelp else {
+            applyCommandText(parts[0])
+            return
+        }
+        for opt in help.options where !isHelpFlag(opt) {
+            let val = value(for: opt.id)
             if opt.argType == .none {
-                if bools[opt.id] == true { parts.append(opt.primaryFlag) }
-            } else {
-                let v = strings[opt.id] ?? ""
-                if !v.isEmpty {
-                    if opt.isShortOnly && opt.primaryFlag.hasPrefix("<") {
-                        parts.append(v)
-                    } else {
-                        parts.append(contentsOf: [opt.primaryFlag, v])
-                    }
+                if val.isOn { parts.append(opt.primaryFlag) }
+            } else if !val.text.isEmpty {
+                if opt.isShortOnly && opt.primaryFlag.hasPrefix("<") {
+                    parts.append(val.text)
+                } else {
+                    parts.append(contentsOf: [opt.primaryFlag, val.text])
                 }
             }
         }
-        commandText = parts.joined(separator: " ")
+        applyCommandText(parts.joined(separator: " "))
     }
 
-    // Parse commandText → option state; equality-guarded so re-renders only fire on real changes
+    private func applyCommandText(_ new: String) {
+        guard new != commandText else { return }
+        suppressParse = true
+        commandText = new
+        updateDerived()
+    }
+
     func syncFromText() {
         guard let help = commandHelp else { return }
         let allTokens = commandText
@@ -95,237 +145,276 @@ final class CommandBuilderViewModel: ObservableObject {
             .split(separator: " ", omittingEmptySubsequences: true).count
         let flagTokens = Array(allTokens.dropFirst(baseParts))
 
-        var newBools: [UUID: Bool] = [:]
-        var newStrings: [UUID: String] = [:]
+        var onFlags: Set<UUID> = []
+        var texts: [UUID: String] = [:]
         var i = 0
         while i < flagTokens.count {
             let token = flagTokens[i]
             if let opt = help.options.first(where: { $0.flags.contains(token) }) {
                 if opt.argType == .none {
-                    newBools[opt.id] = true; i += 1
+                    onFlags.insert(opt.id); i += 1
                 } else if i + 1 < flagTokens.count {
-                    newStrings[opt.id] = flagTokens[i + 1]; i += 2
+                    texts[opt.id] = flagTokens[i + 1]; i += 2
                 } else { i += 1 }
             } else { i += 1 }
         }
-        if newBools != bools { bools = newBools }
-        if newStrings != strings { strings = newStrings }
+
+        for opt in help.options {
+            let val = value(for: opt.id)
+            let nextOn = onFlags.contains(opt.id)
+            if val.isOn != nextOn { val.isOn = nextOn }
+            let nextText = texts[opt.id] ?? ""
+            if val.text != nextText { val.text = nextText }
+        }
     }
 
     func sendBuilt() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        syncToText()
         engine.sendCommand(commandText)
+    }
+
+    func isHelpFlag(_ opt: OptionDef) -> Bool {
+        opt.flags.allSatisfy { $0 == "-h" || $0 == "--help" }
+    }
+
+    func reloadBase(from commandText: String) {
+        let tokens = commandText
+            .trimmingCharacters(in: .whitespaces)
+            .split(separator: " ", omittingEmptySubsequences: true)
+            .map(String.init)
+        let base = tokens.prefix(while: { !$0.hasPrefix("-") }).joined(separator: " ")
+        baseCommand = base.isEmpty ? commandText : base
+        Task { await loadHelp() }
     }
 }
 
-/// The command builder form. Does NOT own a NavigationStack — the caller provides it
-/// (either a sheet wrapping or a pushed NavigationStack destination).
+// MARK: - Root (must not read commandText / option values)
+
 struct CommandBuilderView: View {
-    @StateObject private var vm: CommandBuilderViewModel
+    @State private var vm: CommandBuilderViewModel
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appNav: AppNavigation
     @EnvironmentObject private var favorites: FavoritesStore
     @AppStorage("builderAutoSwitch") private var autoSwitch = true
 
     init(engine: TerminalEngine, initialCommand: String = "") {
-        _vm = StateObject(wrappedValue: CommandBuilderViewModel(engine: engine, initialCommand: initialCommand))
-    }
-
-    private var isFavorited: Bool {
-        favorites.isFavorited(command: vm.commandText)
+        _vm = State(wrappedValue: CommandBuilderViewModel(engine: engine, initialCommand: initialCommand))
     }
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
-                commandSection
-
-                if vm.isLoading {
-                    HStack { Spacer(); ProgressView("Loading options…"); Spacer() }
-                        .liquidGlassCard()
-                }
-
-                if let err = vm.error {
-                    Label(err, systemImage: "xmark.circle").foregroundStyle(.red)
-                        .liquidGlassCard()
-                }
-
-                if let help = vm.commandHelp {
-                    if !help.summary.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("ABOUT").hackerText().font(.subheadline).opacity(0.8)
-                            Text(help.summary)
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                                .liquidGlassCard()
-                        }
-                    }
-
-                    if !help.usage.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("USAGE").hackerText().font(.subheadline).opacity(0.8)
-                            Text(help.usage)
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                                .liquidGlassCard()
-                        }
-                    }
-
-                    let opts = help.options.filter { opt in
-                        !opt.flags.allSatisfy { $0 == "-h" || $0 == "--help" }
-                    }
-                    if !opts.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("OPTIONS").hackerText().font(.subheadline).opacity(0.8)
-                            VStack(spacing: 0) {
-                                ForEach(Array(opts.enumerated()), id: \.element.id) { idx, opt in
-                                    optionRow(opt)
-                                    if idx < opts.count - 1 {
-                                        Divider().background(Color.glassBorder).padding(.vertical, 8)
-                                    }
-                                }
-                            }
-                            .liquidGlassCard()
-                        }
-                    } else {
-                        Label("No configurable options — ready to send.", systemImage: "checkmark.circle")
-                            .foregroundStyle(.secondary)
-                            .liquidGlassCard()
-                    }
-
-                    if !help.examples.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("EXAMPLES").hackerText().font(.subheadline).opacity(0.8)
-                            VStack(alignment: .leading, spacing: 8) {
-                                ForEach(help.examples, id: \.self) { ex in
-                                    Text(ex)
-                                        .font(.system(.caption, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
-                                }
-                            }
-                            .liquidGlassCard()
-                        }
-                    }
-                }
+                BuilderCommandField(vm: vm)
+                BuilderStatus(vm: vm)
+                BuilderHelpAndOptions(vm: vm)
             }
             .padding()
         }
-        .hackerBackground()
-        .onChange(of: vm.commandText) { _, _ in vm.syncFromText() }
+        .background(Color.black)
         .navigationTitle(vm.baseCommand.isEmpty ? "Command Builder" : vm.baseCommand)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                let cmd = vm.commandText.trimmingCharacters(in: .whitespaces)
-                Button {
-                    if isFavorited {
-                        if let fav = favorites.favorites.first(where: { $0.command == cmd }) {
-                            favorites.remove(fav)
-                        }
-                    } else {
-                        let label = vm.baseCommand.isEmpty ? cmd : vm.baseCommand
-                        favorites.add(command: cmd, label: label)
-                    }
-                } label: {
-                    Image(systemName: isFavorited ? "star.fill" : "star")
-                        .foregroundStyle(isFavorited ? .yellow : .secondary)
-                }
-                .disabled(cmd.isEmpty)
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Send") {
-                    vm.sendBuilt()
-                    dismiss()
-                    if autoSwitch { appNav.selectedTab = AppNavigation.terminalTab }
-                }
-                .disabled(vm.isLoading || vm.commandText.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
+            BuilderToolbar(vm: vm, autoSwitch: autoSwitch)
         }
         .onAppear {
-            if !vm.commandText.trimmingCharacters(in: .whitespaces).isEmpty,
-               vm.commandHelp == nil, !vm.isLoading {
-                loadFromText()
+            vm.favorites = favorites
+            vm.updateDerived()
+            if vm.commandHelp == nil, !vm.isLoading {
+                vm.reloadBase(from: vm.commandText)
             }
         }
     }
-
-    // MARK: - Sections
-
-    private var commandSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("COMMAND").hackerText().font(.subheadline).opacity(0.8)
-            TextField("e.g. hf mf autopwn --1k", text: $vm.commandText)
-                .textFieldStyle(.plain)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(.hackerGreen)
-                .liquidGlassCard()
-                .onSubmit { loadFromText() }
-        }
-    }
-
-    private func loadFromText() {
-        let tokens = vm.commandText
-            .trimmingCharacters(in: .whitespaces)
-            .split(separator: " ", omittingEmptySubsequences: true)
-            .map(String.init)
-        // Base command = tokens before the first flag
-        let base = tokens.prefix(while: { !$0.hasPrefix("-") }).joined(separator: " ")
-        vm.baseCommand = base.isEmpty ? vm.commandText : base
-        Task { await vm.loadHelp() }
-    }
-
-    // MARK: - Option rows
-
-    @ViewBuilder
-    private func optionRow(_ opt: OptionDef) -> some View {
-        switch opt.argType {
-        case .none:
-            Toggle(isOn: Binding(
-                get: { vm.bools[opt.id] ?? false },
-                set: { vm.bools[opt.id] = $0; vm.syncToText() }
-            )) {
-                flagLabel(opt)
-            }
-            .tint(.hackerGreen)
-
-        case .hex:
-            OptionInputRow(opt: opt, placeholder: "hex bytes e.g. AABBCCDD", keyboard: .default, vm: vm)
-        case .decimal:
-            OptionInputRow(opt: opt, placeholder: "number", keyboard: .numberPad, vm: vm)
-        case .file:
-            OptionFileRow(opt: opt, vm: vm)
-        case .binary:
-            OptionInputRow(opt: opt, placeholder: "binary string e.g. 0001101", keyboard: .default, vm: vm)
-        case .string:
-            OptionInputRow(opt: opt, placeholder: opt.argLabel ?? "value", keyboard: .default, vm: vm)
-        }
-    }
-
-    @ViewBuilder
-    private func flagLabel(_ opt: OptionDef) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(opt.displayFlag).hackerText().font(.system(.subheadline, design: .monospaced))
-            Text(opt.description).font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
 }
 
-// Separate View struct so @State can track the TextField's string independently.
-// A plain Binding(get:set:) in a @ViewBuilder function doesn't reliably push
-// external binding changes into SwiftUI's TextField display buffer when the field
-// has never been focused — @State + onChange fixes that.
-struct OptionInputRow: View {
-    let opt: OptionDef
-    let placeholder: String
-    let keyboard: UIKeyboardType
-    @ObservedObject var vm: CommandBuilderViewModel
+private struct BuilderToolbar: ToolbarContent {
+    @Bindable var vm: CommandBuilderViewModel
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appNav: AppNavigation
+    @EnvironmentObject private var favorites: FavoritesStore
+    let autoSwitch: Bool
 
-    @State private var text: String = ""
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarLeading) {
+            Button {
+                let cmd = vm.commandText.trimmingCharacters(in: .whitespaces)
+                if vm.isStarred {
+                    if let fav = favorites.favorites.first(where: { $0.command == cmd }) {
+                        favorites.remove(fav)
+                    }
+                } else {
+                    let label = vm.baseCommand.isEmpty ? cmd : vm.baseCommand
+                    favorites.add(command: cmd, label: label)
+                }
+                vm.updateDerived()
+            } label: {
+                Image(systemName: vm.isStarred ? "star.fill" : "star")
+                    .foregroundStyle(vm.isStarred ? .yellow : .secondary)
+            }
+            .disabled(!vm.isSendable)
+        }
+        ToolbarItem(placement: .confirmationAction) {
+            Button("Send") {
+                vm.sendBuilt()
+                dismiss()
+                if autoSwitch { appNav.selectedTab = AppNavigation.terminalTab }
+            }
+            .disabled(vm.isLoading || !vm.isSendable)
+        }
+    }
+}
+
+private struct BuilderCommandField: View {
+    @Bindable var vm: CommandBuilderViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("COMMAND").hackerText().font(.subheadline).opacity(0.8)
+            FastTextField(
+                text: $vm.commandText,
+                placeholder: "e.g. hf mf autopwn --1k",
+                keyboard: .asciiCapable,
+                onSubmit: { vm.reloadBase(from: vm.commandText) }
+            )
+            .frame(height: 36)
+            .padding(8)
+            .builderPanel()
+        }
+        .onChange(of: vm.commandText) { _, _ in
+            vm.handleExternalCommandEdit()
+        }
+    }
+}
+
+private struct BuilderStatus: View {
+    var vm: CommandBuilderViewModel
+
+    var body: some View {
+        if vm.isLoading {
+            HStack { Spacer(); ProgressView("Loading options…"); Spacer() }
+                .builderPanel()
+        }
+        if let err = vm.error {
+            Label(err, systemImage: "xmark.circle").foregroundStyle(.red)
+                .builderPanel()
+        }
+    }
+}
+
+private struct BuilderHelpAndOptions: View {
+    var vm: CommandBuilderViewModel
+
+    var body: some View {
+        if let help = vm.commandHelp {
+            if !help.summary.isEmpty {
+                labeledBlock("ABOUT", help.summary)
+            }
+            if !help.usage.isEmpty {
+                labeledBlock("USAGE", help.usage)
+            }
+
+            let opts = help.options.filter { !vm.isHelpFlag($0) }
+            if opts.isEmpty {
+                Label("No configurable options — ready to send.", systemImage: "checkmark.circle")
+                    .foregroundStyle(.secondary)
+                    .builderPanel()
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("OPTIONS").hackerText().font(.subheadline).opacity(0.8)
+                    VStack(spacing: 0) {
+                        ForEach(opts) { opt in
+                            BuilderOptionRow(opt: opt, vm: vm)
+                        }
+                    }
+                    .builderPanel()
+                }
+            }
+
+            if !help.examples.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("EXAMPLES").hackerText().font(.subheadline).opacity(0.8)
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(help.examples, id: \.self) { ex in
+                            Text(ex)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .builderPanel()
+                }
+            }
+        }
+    }
+
+    private func labeledBlock(_ title: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).hackerText().font(.subheadline).opacity(0.8)
+            Text(text)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .builderPanel()
+        }
+    }
+}
+
+private struct BuilderOptionRow: View {
+    let opt: OptionDef
+    var vm: CommandBuilderViewModel
+
+    var body: some View {
+        Group {
+            switch opt.argType {
+            case .none:
+                OptionToggleRow(opt: opt, value: vm.value(for: opt.id), vm: vm)
+            case .file:
+                OptionFileRow(opt: opt, value: vm.value(for: opt.id), vm: vm)
+            default:
+                OptionInputRow(opt: opt, value: vm.value(for: opt.id), vm: vm)
+            }
+        }
+        Divider().background(Color.glassBorder)
+    }
+}
+
+private struct OptionToggleRow: View {
+    let opt: OptionDef
+    @Bindable var value: OptionValue
+    var vm: CommandBuilderViewModel
+
+    var body: some View {
+        Toggle(isOn: $value.isOn) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(opt.displayFlag).hackerText().font(.system(.subheadline, design: .monospaced))
+                Text(opt.description).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .tint(.hackerGreen)
+        .padding(.vertical, 4)
+        .onChange(of: value.isOn) { _, _ in
+            vm.syncToText()
+        }
+    }
+}
+
+private struct OptionInputRow: View {
+    let opt: OptionDef
+    @Bindable var value: OptionValue
+    var vm: CommandBuilderViewModel
+
+    private var placeholder: String {
+        switch opt.argType {
+        case .hex:     return "hex bytes e.g. AABBCCDD"
+        case .decimal: return "number"
+        case .binary:  return "binary string e.g. 0001101"
+        default:       return opt.argLabel ?? "value"
+        }
+    }
+
+    private var keyboard: UIKeyboardType {
+        opt.argType == .decimal ? .numberPad : .asciiCapable
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -338,38 +427,28 @@ struct OptionInputRow: View {
                 }
             }
             Text(opt.description).font(.caption).foregroundStyle(.secondary)
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.plain)
-                .padding(8)
-                .background(Color.black.opacity(0.3).cornerRadius(8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.glassBorder, lineWidth: 1))
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .keyboardType(keyboard)
-                .font(.system(.body, design: .monospaced))
-                // User typed in this field → push to VM
-                .onChange(of: text) { _, new in
-                    vm.strings[opt.id] = new.isEmpty ? nil : new
-                    vm.syncToText()
-                }
-                // Command text changed externally (syncFromText) → pull into field
-                .onChange(of: vm.strings[opt.id]) { _, new in
-                    let incoming = new ?? ""
-                    if incoming != text { text = incoming }
-                }
+            FastTextField(
+                text: $value.text,
+                placeholder: placeholder,
+                keyboard: keyboard,
+                onSubmit: { vm.syncToText() }
+            )
+            .frame(height: 32)
+            .padding(8)
+            .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.glassBorder, lineWidth: 1))
         }
-        .padding(.vertical, 2)
-        .onAppear { text = vm.strings[opt.id] ?? "" }
+        .padding(.vertical, 6)
+        .onChange(of: value.text) { _, _ in
+            vm.syncToText()
+        }
     }
 }
 
-// MARK: - File picker option row
-
-struct OptionFileRow: View {
+private struct OptionFileRow: View {
     let opt: OptionDef
-    @ObservedObject var vm: CommandBuilderViewModel
-
-    @State private var text: String = ""
+    @Bindable var value: OptionValue
+    var vm: CommandBuilderViewModel
     @State private var showPicker = false
 
     var body: some View {
@@ -384,22 +463,16 @@ struct OptionFileRow: View {
             }
             Text(opt.description).font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 8) {
-                TextField("filename", text: $text)
-                    .textFieldStyle(.plain)
-                    .padding(8)
-                    .background(Color.black.opacity(0.3).cornerRadius(8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.glassBorder, lineWidth: 1))
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .font(.system(.body, design: .monospaced))
-                    .onChange(of: text) { _, new in
-                        vm.strings[opt.id] = new.isEmpty ? nil : new
-                        vm.syncToText()
-                    }
-                    .onChange(of: vm.strings[opt.id]) { _, new in
-                        let incoming = new ?? ""
-                        if incoming != text { text = incoming }
-                    }
+                FastTextField(
+                    text: $value.text,
+                    placeholder: "filename",
+                    keyboard: .asciiCapable,
+                    onSubmit: { vm.syncToText() }
+                )
+                .frame(height: 32)
+                .padding(8)
+                .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.glassBorder, lineWidth: 1))
                 Button { showPicker = true } label: {
                     Image(systemName: "folder")
                         .foregroundStyle(.hackerGreen)
@@ -407,15 +480,106 @@ struct OptionFileRow: View {
                 .buttonStyle(.bordered)
             }
         }
-        .padding(.vertical, 2)
-        .onAppear { text = vm.strings[opt.id] ?? "" }
+        .padding(.vertical, 6)
+        .onChange(of: value.text) { _, _ in
+            vm.syncToText()
+        }
         .sheet(isPresented: $showPicker) {
             PM3FilePicker { selected in
-                text = selected
-                vm.strings[opt.id] = selected
+                value.text = selected
                 vm.syncToText()
             }
         }
+    }
+}
+
+// MARK: - UIKit field (SwiftUI TextField round-trips through the view graph)
+
+private struct FastTextField: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var keyboard: UIKeyboardType
+    var onSubmit: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField()
+        field.delegate = context.coordinator
+        field.font = .monospacedSystemFont(ofSize: 16, weight: .regular)
+        field.textColor = UIColor(red: 0, green: 1, blue: 0.25, alpha: 1)
+        field.tintColor = field.textColor
+        field.autocorrectionType = .no
+        field.autocapitalizationType = .none
+        field.spellCheckingType = .no
+        field.smartDashesType = .no
+        field.smartQuotesType = .no
+        field.smartInsertDeleteType = .no
+        field.keyboardType = keyboard
+        field.returnKeyType = .done
+        field.clearButtonMode = .whileEditing
+        field.text = text
+        field.addTarget(context.coordinator, action: #selector(Coordinator.editingChanged(_:)), for: .editingChanged)
+        return field
+    }
+
+    func updateUIView(_ field: UITextField, context: Context) {
+        context.coordinator.text = $text
+        context.coordinator.onSubmit = onSubmit
+        if field.placeholder != placeholder { field.placeholder = placeholder }
+        if field.keyboardType != keyboard { field.keyboardType = keyboard }
+        if field.text != text, !field.isFirstResponder {
+            field.text = text
+        }
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var text: Binding<String> = .constant("")
+        var onSubmit: () -> Void = {}
+        private var latest = ""
+        private var debounceWork: DispatchWorkItem?
+
+        @objc func editingChanged(_ sender: UITextField) {
+            latest = sender.text ?? ""
+            debounceWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                if self.text.wrappedValue != self.latest {
+                    self.text.wrappedValue = self.latest
+                }
+            }
+            debounceWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        }
+
+        func flush(_ field: UITextField) {
+            debounceWork?.cancel()
+            debounceWork = nil
+            latest = field.text ?? ""
+            if text.wrappedValue != latest {
+                text.wrappedValue = latest
+            }
+        }
+
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            flush(textField)
+        }
+
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            flush(textField)
+            textField.resignFirstResponder()
+            onSubmit()
+            return true
+        }
+    }
+}
+
+private extension View {
+    func builderPanel() -> some View {
+        self
+            .padding()
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color.black.opacity(0.45)))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.glassBorder, lineWidth: 1))
     }
 }
 
@@ -427,8 +591,8 @@ struct PM3FilePicker: View {
 
     struct FileEntry: Identifiable {
         let id = UUID()
-        let baseName: String   // what pm3 expects (no extension)
-        let fullName: String   // display
+        let baseName: String
+        let fullName: String
         let ext: String
     }
 

@@ -34,6 +34,9 @@ final class BLETransport: NSObject, ObservableObject {
 
     private var portFD: Int32 = -1
     private let portWriteQueue = DispatchQueue(label: "com.proxbuddy.ble.port", qos: .userInteractive)
+    private var pendingDiscoveries: [UUID: DiscoveredPeripheral] = [:]
+    private var discoveryFlushWork: DispatchWorkItem?
+    private static let rssiBucket = 5
 
     let connectionEvents: AsyncStream<ConnectionState>
     private let connectionContinuation: AsyncStream<ConnectionState>.Continuation
@@ -100,6 +103,9 @@ final class BLETransport: NSObject, ObservableObject {
     // MARK: - Scanning & Connection Management
 
     func startScanning() {
+        discoveryFlushWork?.cancel()
+        discoveryFlushWork = nil
+        pendingDiscoveries.removeAll()
         discoveredPeripherals = []
         connectionState = .scanning
         // Scan for ALL peripherals — the PM5 may not advertise our specific service
@@ -111,8 +117,56 @@ final class BLETransport: NSObject, ObservableObject {
     }
 
     func stopScanning() {
+        discoveryFlushWork?.cancel()
+        discoveryFlushWork = nil
+        flushDiscoveries()
         centralManager.stopScan()
         if connectionState == .scanning { connectionState = .disconnected }
+    }
+
+    private func ingestDiscovery(_ discovered: DiscoveredPeripheral) {
+        if let idx = discoveredPeripherals.firstIndex(where: { $0.id == discovered.id }) {
+            let old = discoveredPeripherals[idx]
+            if old.name == discovered.name && old.rssi / Self.rssiBucket == discovered.rssi / Self.rssiBucket {
+                return
+            }
+            pendingDiscoveries[discovered.id] = discovered
+            scheduleDiscoveryFlush()
+        } else {
+            discoveredPeripherals.append(discovered)
+        }
+    }
+
+    private func scheduleDiscoveryFlush() {
+        guard discoveryFlushWork == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.discoveryFlushWork = nil
+            self?.flushDiscoveries()
+        }
+        discoveryFlushWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    private func flushDiscoveries() {
+        guard !pendingDiscoveries.isEmpty else { return }
+        let pending = pendingDiscoveries
+        pendingDiscoveries.removeAll(keepingCapacity: true)
+        var list = discoveredPeripherals
+        var changed = false
+        for (id, discovered) in pending {
+            if let idx = list.firstIndex(where: { $0.id == id }) {
+                let old = list[idx]
+                if old.name == discovered.name && old.rssi / Self.rssiBucket == discovered.rssi / Self.rssiBucket {
+                    continue
+                }
+                list[idx] = discovered
+                changed = true
+            } else {
+                list.append(discovered)
+                changed = true
+            }
+        }
+        if changed { discoveredPeripherals = list }
     }
 
     func connect(to discovered: DiscoveredPeripheral) {
@@ -171,11 +225,7 @@ extension BLETransport: CBCentralManagerDelegate {
 
         MainActor.assumeIsolated {
             let discovered = DiscoveredPeripheral(id: id, name: displayName, rssi: rssi, peripheral: peripheral)
-            if let idx = discoveredPeripherals.firstIndex(where: { $0.id == id }) {
-                discoveredPeripherals[idx] = discovered
-            } else {
-                discoveredPeripherals.append(discovered)
-            }
+            ingestDiscovery(discovered)
         }
     }
 

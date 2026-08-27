@@ -497,8 +497,7 @@ final class BinaryRunner: ObservableObject {
     // pm3 prompt ends with "pm3 --> " but color codes are embedded between "pm3 " and "-->"
     // so we strip all ANSI before checking.
     private nonisolated static func looksLikePrompt(_ s: String) -> Bool {
-        let stripped = s.replacingOccurrences(of: #"\x1B\[[0-9;]*[a-zA-Z]"#, with: "",
-                                               options: .regularExpression)
+        let stripped = ANSIParser.strip(s)
         return stripped.contains("pm3 -->")
     }
 

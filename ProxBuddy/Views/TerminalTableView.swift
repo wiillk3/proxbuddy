@@ -48,9 +48,11 @@ struct TerminalTableView: UIViewRepresentable {
         var tableView: UITableView?
         var dataSource: UITableViewDiffableDataSource<Int, UUID>?
         private var lineMap: [UUID: TerminalLine] = [:]
+        private var appliedIDs: [UUID] = []
         private var cancellable: AnyCancellable?
         var currentShowTimestamps: Bool = false
         private var pendingFlush: DispatchWorkItem?
+        private var pendingLines: [TerminalLine]?
 
         init(parent: TerminalTableView) {
             self.parent = parent
@@ -90,37 +92,58 @@ struct TerminalTableView: UIViewRepresentable {
         }
 
         private func scheduleApply(lines: [TerminalLine]) {
-            // Rebuild local map
+            pendingLines = lines
+            guard pendingFlush == nil else { return }
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.pendingFlush = nil
+                guard let latest = self.pendingLines else { return }
+                self.pendingLines = nil
+                self.applyNow(lines: latest)
+            }
+            pendingFlush = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016, execute: workItem)
+        }
+
+        private func applyNow(lines: [TerminalLine]) {
+            guard let ds = dataSource else { return }
+
             var map: [UUID: TerminalLine] = [:]
             var ids: [UUID] = []
             ids.reserveCapacity(lines.count)
+            map.reserveCapacity(lines.count)
             for line in lines {
                 map[line.id] = line
                 ids.append(line.id)
             }
-            self.lineMap = map
+            lineMap = map
 
-            // Throttled snapshot application to maximize UI responsiveness
-            pendingFlush?.cancel()
-            let workItem = DispatchWorkItem { [weak self] in
-                guard let self = self, let ds = self.dataSource, let tv = self.tableView else { return }
+            if ids == appliedIDs { return }
 
-                var snapshot = NSDiffableDataSourceSnapshot<Int, UUID>()
-                snapshot.appendSections([0])
-                snapshot.appendItems(ids, toSection: 0)
-
-                let isAtBottom = self.parent.isAutoScrolling
-                ds.apply(snapshot, animatingDifferences: false) { [weak self] in
-                    guard let self = self, isAtBottom, let lastID = ids.last else { return }
-                    if let lastIndex = ids.firstIndex(of: lastID) {
-                        let ip = IndexPath(row: lastIndex, section: 0)
-                        self.tableView?.scrollToRow(at: ip, at: .bottom, animated: false)
-                    }
-                }
+            let isAtBottom = parent.isAutoScrolling
+            let snapshot: NSDiffableDataSourceSnapshot<Int, UUID>
+            if appliedIDs.isEmpty || ids.isEmpty {
+                var full = NSDiffableDataSourceSnapshot<Int, UUID>()
+                full.appendSections([0])
+                full.appendItems(ids, toSection: 0)
+                snapshot = full
+            } else {
+                var delta = ds.snapshot()
+                let newSet = Set(ids)
+                let removed = appliedIDs.filter { !newSet.contains($0) }
+                if !removed.isEmpty { delta.deleteItems(removed) }
+                let appliedSet = Set(appliedIDs)
+                let added = ids.filter { !appliedSet.contains($0) }
+                if !added.isEmpty { delta.appendItems(added, toSection: 0) }
+                snapshot = delta
             }
-            pendingFlush = workItem
-            // Dispatch immediately or coalesce within 16ms
-            DispatchQueue.main.async(execute: workItem)
+
+            appliedIDs = ids
+            ds.apply(snapshot, animatingDifferences: false) { [weak self] in
+                guard let self, isAtBottom, !ids.isEmpty else { return }
+                let ip = IndexPath(row: ids.count - 1, section: 0)
+                self.tableView?.scrollToRow(at: ip, at: .bottom, animated: false)
+            }
         }
 
         func reloadCurrentData() {
@@ -288,7 +311,7 @@ final class TerminalLineCell: UITableViewCell, UIContextMenuInteractionDelegate 
                 UIPasteboard.general.string = raw
             }
 
-            let clean = raw.replacingOccurrences(of: #"\x1B\[[0-9;]*[a-zA-Z]"#, with: "", options: .regularExpression)
+            let clean = ANSIParser.strip(raw)
             let copyClean = UIAction(title: "Copy Clean Text", image: UIImage(systemName: "text.quote")) { _ in
                 UIPasteboard.general.string = clean
             }

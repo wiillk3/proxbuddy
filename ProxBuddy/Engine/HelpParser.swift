@@ -354,6 +354,6 @@ enum HelpParser {
     }
 
     private static func stripAnsi(_ s: String) -> String {
-        s.replacingOccurrences(of: #"\x1B\[[0-9;]*[a-zA-Z]"#, with: "", options: .regularExpression)
+        ANSIParser.strip(s)
     }
 }

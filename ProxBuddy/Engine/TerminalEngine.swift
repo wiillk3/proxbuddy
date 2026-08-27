@@ -1,5 +1,7 @@
 import Foundation
-import SwiftUI
+import os
+
+private let terminalSignposter = OSSignposter(subsystem: "rfid.spot.proxbuddy", category: "Terminal")
 
 struct TerminalLine: Identifiable, @unchecked Sendable, Equatable {
     let id: UUID
@@ -7,7 +9,6 @@ struct TerminalLine: Identifiable, @unchecked Sendable, Equatable {
     let timestamp: Date
     let isInput: Bool
     let hint: String?
-    let attributedText: AttributedString
     let nsAttributedText: NSAttributedString
 
     init(id: UUID = UUID(), raw: String, timestamp: Date, isInput: Bool) {
@@ -16,11 +17,6 @@ struct TerminalLine: Identifiable, @unchecked Sendable, Equatable {
         self.timestamp = timestamp
         self.isInput = isInput
         self.hint = TerminalLine.extractHint(from: raw)
-        self.attributedText = ANSIParser.parse(
-            raw,
-            fontSize: 13,
-            defaultColor: isInput ? ANSIParser.inputDefault : ANSIParser.outputDefault
-        )
         self.nsAttributedText = ANSIParser.parseNS(
             raw,
             fontSize: 13,
@@ -60,6 +56,11 @@ final class TerminalEngine: ObservableObject {
 
     private let historyKey = "com.proxbuddy.commandHistory"
     private let maxHistory = 500
+    private let maxLines = 5000
+    private let trimSlack = 500
+
+    private static let logQueue = DispatchQueue(label: "com.proxbuddy.sessionlog", qos: .utility)
+    nonisolated(unsafe) private static let isoFormatter = ISO8601DateFormatter()
 
     private weak var runner: BinaryRunner?
 
@@ -94,7 +95,7 @@ final class TerminalEngine: ObservableObject {
             let displayLine = isLive ? String(raw.dropFirst()) : raw
             var skipDisplay = false
 
-            let clean = stripAnsi(displayLine)
+            let clean = ANSIParser.strip(displayLine)
             let trimmedClean = clean.trimmingCharacters(in: .whitespaces)
 
             // Ignore pure spinner or line-clearing erase frames (e.g. "[/]" or spaces)
@@ -145,6 +146,7 @@ final class TerminalEngine: ObservableObject {
                     lines[idx] = liveTag
                 } else {
                     lines.append(liveTag)
+                    trimIfNeeded()
                 }
             } else {
                 append(TerminalLine(raw: raw, timestamp: Date(), isInput: false))
@@ -173,10 +175,6 @@ final class TerminalEngine: ObservableObject {
         return await withCheckedContinuation { cont in
             captureContinuation = cont
         }
-    }
-
-    private func stripAnsi(_ s: String) -> String {
-        s.replacingOccurrences(of: #"\x1B\[[0-9;]*[a-zA-Z]"#, with: "", options: .regularExpression)
     }
 
     private func isBarePrompt(_ clean: String) -> Bool {
@@ -241,9 +239,7 @@ final class TerminalEngine: ObservableObject {
     private func parseSignalSamples(from lines: [String]) -> [Double] {
         var samples: [Double] = []
         for line in lines {
-            let clean = line
-                .replacingOccurrences(of: #"\x1B\[[0-9;]*[a-zA-Z]"#, with: "", options: .regularExpression)
-                .replacingOccurrences(of: #"^\[.\]\s*"#, with: "", options: .regularExpression)
+            let clean = ANSIParser.stripPM3Prefix(ANSIParser.strip(line))
                 .trimmingCharacters(in: .whitespaces)
             for token in clean.components(separatedBy: .whitespaces) {
                 if let v = Double(token) { samples.append(v) }
@@ -286,12 +282,18 @@ final class TerminalEngine: ObservableObject {
         sessionLogURL = url
         sessionLogHandle = try? FileHandle(forWritingTo: url)
         let header = "=== ProxBuddy session \(Date()) ===\n"
-        sessionLogHandle?.write(header.data(using: .utf8) ?? Data())
+        let handle = sessionLogHandle
+        Self.logQueue.async {
+            handle?.write(header.data(using: .utf8) ?? Data())
+        }
     }
 
     func endSession() {
-        sessionLogHandle?.closeFile()
+        let handle = sessionLogHandle
         sessionLogHandle = nil
+        Self.logQueue.async {
+            handle?.closeFile()
+        }
     }
 
     func clearDisplay() {
@@ -301,9 +303,18 @@ final class TerminalEngine: ObservableObject {
     // MARK: - Private
 
     private func append(_ line: TerminalLine) {
+        let state = terminalSignposter.beginInterval("append")
+        defer { terminalSignposter.endInterval("append", state) }
         writeToLog(line)
         guard shouldDisplay(line.raw) else { return }
         lines.append(line)
+        trimIfNeeded()
+    }
+
+    private func trimIfNeeded() {
+        if lines.count > maxLines {
+            lines.removeFirst(lines.count - maxLines + trimSlack)
+        }
     }
 
     // Lines we never want cluttering the terminal display.
@@ -339,8 +350,12 @@ final class TerminalEngine: ObservableObject {
     }
 
     private func writeToLog(_ line: TerminalLine) {
-        let iso = ISO8601DateFormatter()
-        let text = "[\(iso.string(from: line.timestamp))] \(line.raw)\n"
-        sessionLogHandle?.write(text.data(using: .utf8) ?? Data())
+        guard let handle = sessionLogHandle else { return }
+        let ts = line.timestamp
+        let raw = line.raw
+        Self.logQueue.async {
+            let text = "[\(Self.isoFormatter.string(from: ts))] \(raw)\n"
+            handle.write(text.data(using: .utf8) ?? Data())
+        }
     }
 }

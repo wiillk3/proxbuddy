@@ -4,6 +4,7 @@ struct TerminalView: View {
     @EnvironmentObject var engine:        TerminalEngine
     @EnvironmentObject var appNav:        AppNavigation
     @EnvironmentObject var deviceManager: DeviceManager
+    @EnvironmentObject var runner:        BinaryRunner
     #if !targetEnvironment(simulator)
     @EnvironmentObject var tcp: TcpTransport
     @EnvironmentObject var ble: BLETransport
@@ -92,22 +93,11 @@ struct TerminalView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(deviceManager.sessions) { session in
-                    let isActive = deviceManager.activeSession?.id == session.id
-                    Button {
+                    DevicePickerChip(
+                        session: session,
+                        isActive: deviceManager.activeSession?.id == session.id
+                    ) {
                         deviceManager.setActive(session)
-                    } label: {
-                        HStack(spacing: 5) {
-                            Circle()
-                                .fill(session.isRunning ? Color.green : Color.yellow)
-                                .frame(width: 6, height: 6)
-                            Text(session.label)
-                                .font(.system(.caption, design: .monospaced))
-                        }
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(isActive ? Color.green.opacity(0.2) : Color.white.opacity(0.07))
-                        .foregroundStyle(isActive ? .green : .gray)
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(isActive ? Color.green.opacity(0.5) : Color.clear, lineWidth: 1))
                     }
                 }
             }
@@ -149,9 +139,9 @@ struct TerminalView: View {
         if let session = deviceManager.activeSession {
             switch session.selectedTransportMode {
             case .ble:
-                return (ble.connectionState == .ready && session.isRunning) ? .green : .yellow
+                return (ble.connectionState == .ready && runner.isRunning) ? .green : .yellow
             case .wifiDirect, .bridge:
-                return (tcp.isReady && session.isRunning) ? .green : .yellow
+                return (tcp.isReady && runner.isRunning) ? .green : .yellow
             }
         }
         return .yellow
@@ -167,5 +157,28 @@ struct TerminalView: View {
         }
         return tcp.statusMessage
         #endif
+    }
+}
+
+private struct DevicePickerChip: View {
+    @ObservedObject var session: PM3Session
+    let isActive: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(session.isRunning ? Color.green : Color.yellow)
+                    .frame(width: 6, height: 6)
+                Text(session.label)
+                    .font(.system(.caption, design: .monospaced))
+            }
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(isActive ? Color.green.opacity(0.2) : Color.white.opacity(0.07))
+            .foregroundStyle(isActive ? .green : .gray)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(isActive ? Color.green.opacity(0.5) : Color.clear, lineWidth: 1))
+        }
     }
 }
