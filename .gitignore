@@ -54,9 +54,6 @@ fastlane/test_output
 libpm3client.dylib
 ProxBuddy/libpm3client.dylib
 
-# ProxBuddyBridge (Deprecated / will be removed for PM5)
-ProxBuddyBridge/
-
 # App Data / Logs
 *.log
 *.txt

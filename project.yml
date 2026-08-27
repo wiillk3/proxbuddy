@@ -66,14 +66,12 @@ targets:
       properties:
         UILaunchScreen:
           UIColorName: White
-        NSLocalNetworkUsageDescription: "Access the local network to find and connect to the ProxBuddy Bridge proxy."
+        NSLocalNetworkUsageDescription: "ProxBuddy uses the local network to connect to your Proxmark5 over Wi-Fi Direct."
         NSBluetoothAlwaysUsageDescription: "ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device."
         NSBluetoothPeripheralUsageDescription: "ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device."
         NSLocationWhenInUseUsageDescription: "ProxBuddy uses your location to optionally tag RFID/NFC card dumps with GPS coordinates for spatial analysis."
         UIBackgroundModes:
           - bluetooth-central
-        NSBonjourServices:
-          - "_proxbuddy._tcp"
 
     entitlements:
       path: ProxBuddy/ProxBuddy.entitlements

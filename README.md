@@ -60,8 +60,7 @@ Open the generated `ProxBuddy.xcodeproj` in Xcode.
 - **Running on Physical iOS Device**: The app uses `dlopen` to load `libpm3client.dylib` into the app's process memory, creating a dedicated C-thread for the PM3 engine and routing stdin/stdout over to the SwiftUI terminal.
 
 ## Roadmap & Notes
-- **Proxmark 5 Support**: The architecture is currently designed to cleanly accept PM5 hardware integrations upon release. 
-- *Note: The legacy TCP Bridge component has been deprecated and removed from this repository in preparation for native device integrations.*
+- **Proxmark 5 Support**: Native BLE and Wi-Fi Direct to the PM5 BWM module.
 
 ## License
 Private repository. All rights reserved.

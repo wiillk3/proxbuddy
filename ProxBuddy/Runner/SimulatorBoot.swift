@@ -6,7 +6,7 @@ import Foundation
 // entirely and hand the macOS pm3 binary the real USB serial port.
 //
 // This lets you test the full pm3 client + TerminalEngine pipeline against
-// real hardware without BLE, TCP, or any bridge process.
+// real hardware without BLE or TCP.
 enum SimulatorBoot {
     // Locations to check for the macOS pm3 binary, in priority order.
     private static let pm3Candidates = [

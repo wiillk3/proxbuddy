@@ -157,7 +157,6 @@ private struct SessionCardView: View {
                     )) {
                         Text("PM5 BLE").tag(TransportMode.ble)
                         Text("Wi-Fi Direct").tag(TransportMode.wifiDirect(host: "192.168.1.50", port: 9099))
-                        Text("Mac Bridge").tag(TransportMode.bridge)
                     }
                     .pickerStyle(.segmented)
                 }

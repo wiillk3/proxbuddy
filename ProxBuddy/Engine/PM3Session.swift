@@ -4,13 +4,11 @@ import Combine
 enum TransportMode: Hashable, Identifiable {
     case ble
     case wifiDirect(host: String, port: UInt16)
-    case bridge
 
     var id: String {
         switch self {
         case .ble: return "ble"
         case .wifiDirect(let h, let p): return "wifi-\(h):\(p)"
-        case .bridge: return "bridge"
         }
     }
 }
@@ -87,7 +85,7 @@ final class PM3Session: ObservableObject, Identifiable {
             }
             nextReady = bleTransport.connectionState == .ready
             nextBattery = bleTransport.batteryLevel
-        case .wifiDirect, .bridge:
+        case .wifiDirect:
             nextStatus = tcpTransport.statusMessage
             nextReady = true
             nextBattery = nil
@@ -132,9 +130,6 @@ final class PM3Session: ObservableObject, Identifiable {
                 bleTransport.attach(portFD: runner.portMasterFD)
             case .wifiDirect(let host, let port):
                 tcpTransport.connect(host: host, port: port)
-                tcpTransport.attach(portFD: runner.portMasterFD)
-            case .bridge:
-                tcpTransport.startBrowsing()
                 tcpTransport.attach(portFD: runner.portMasterFD)
             }
         }

@@ -7,12 +7,7 @@
 ///       → TerminalEngine (AsyncStream line accumulation)
 ///
 /// Hardware setup required:
-///   Mac:  cd ProxBuddyBridge && swift run   (connects to RDV4 via USB, advertises NUS as "ProxBuddy-Bridge")
-///   iOS:  run this test on a device (simulator has no BLE)
-///
-/// When the PM5 ships:
-///   Change PERIPHERAL_NAME below to "ProxMark5" (or whatever the PM5 advertises).
-///   Nothing else changes — the pipeline is identical.
+///   iOS device with a Proxmark5 advertising over BLE
 ///
 /// Skip behaviour:
 ///   If no matching BLE peripheral is found within SCAN_TIMEOUT seconds the
@@ -23,8 +18,8 @@ import XCTest
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-/// Name the peripheral advertises. Switch to PM5 name when hardware arrives.
-private let PERIPHERAL_NAME = "ProxBuddy-Bridge"
+/// Name the peripheral advertises.
+private let PERIPHERAL_NAME = "Proxmark5"
 
 /// UID of the card under test. Override via PROXBUDDY_TEST_UID env var.
 private var EXPECTED_UID: String {
@@ -106,7 +101,7 @@ final class PipelineIntegrationTests: XCTestCase {
                       "Expected weak PRNG")
     }
 
-    /// Smoke test: just validates pm3client starts and the bridge is responsive.
+    /// Smoke test: just validates pm3client starts and the PM5 is responsive.
     /// Run this first if the full test times out.
     func test_pipeline_hwPing() async throws {
         let peripheral = try await scanForPeripheral(named: PERIPHERAL_NAME, timeout: SCAN_TIMEOUT)
@@ -141,7 +136,7 @@ final class PipelineIntegrationTests: XCTestCase {
         }
 
         ble.stopScanning()
-        throw XCTSkip("\(name) not found within \(Int(timeout))s — start ProxBuddyBridge on Mac first")
+        throw XCTSkip("\(name) not found within \(Int(timeout))s — connect a Proxmark5 first")
     }
 
     private func waitForBLEReady(timeout: TimeInterval) async throws {

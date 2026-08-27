@@ -140,7 +140,7 @@ struct TerminalView: View {
             switch session.selectedTransportMode {
             case .ble:
                 return (ble.connectionState == .ready && runner.isRunning) ? .green : .yellow
-            case .wifiDirect, .bridge:
+            case .wifiDirect:
                 return (tcp.isReady && runner.isRunning) ? .green : .yellow
             }
         }

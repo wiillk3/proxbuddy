@@ -1,7 +1,7 @@
 import Foundation
 import Network
 
-// Connects to Proxmark5 (or ProxBuddyBridge) over TCP/WiFi.
+// Connects to Proxmark5 over TCP/Wi-Fi Direct.
 // Relays data between pm3's socket (provided by BinaryRunner) and the remote TCP server.
 
 @MainActor
@@ -10,7 +10,6 @@ final class TcpTransport: ObservableObject {
     @Published var statusMessage = "Disconnected"
 
     private var connection: NWConnection?
-    private var browser: NWBrowser?
     private var portFD: Int32 = -1
     private let portWriteQueue = DispatchQueue(label: "com.proxbuddy.tcp.port", qos: .userInteractive)
 
@@ -46,7 +45,7 @@ final class TcpTransport: ObservableObject {
         conn.send(content: data, completion: .idempotent)
     }
 
-    private func receivedFromBridge(_ data: Data) {
+    private func receivedFromTCP(_ data: Data) {
         let fd = portFD
         guard fd >= 0 else { return }
         portWriteQueue.async {
@@ -72,30 +71,7 @@ final class TcpTransport: ObservableObject {
         setupConnection(to: endpoint, label: "\(host):\(port)")
     }
 
-    /// Discover and connect to ProxBuddy-Bridge via Bonjour
-    func startBrowsing() {
-        disconnect()
-        statusMessage = "Searching for ProxBuddy-Bridge…"
-        let b = NWBrowser(for: .bonjour(type: "_proxbuddy._tcp", domain: nil), using: .tcp)
-        browser = b
-        b.browseResultsChangedHandler = { [weak self] results, _ in
-            guard let self else { return }
-            if let first = results.first {
-                Task { @MainActor in self.setupConnection(to: first.endpoint, label: "ProxBuddy-Bridge") }
-            }
-        }
-        b.stateUpdateHandler = { [weak self] state in
-            if case .failed(let e) = state {
-                Task { @MainActor in self?.statusMessage = "Bonjour failed: \(e)" }
-            }
-        }
-        b.start(queue: .main)
-    }
-
     private func setupConnection(to endpoint: NWEndpoint, label: String) {
-        browser?.cancel()
-        browser = nil
-
         let conn = NWConnection(to: endpoint, using: .tcp)
         connection = conn
 
@@ -124,15 +100,13 @@ final class TcpTransport: ObservableObject {
     private func receiveLoop(_ conn: NWConnection) {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 512) { [weak self] data, _, done, error in
             if let data, !data.isEmpty {
-                Task { @MainActor in self?.receivedFromBridge(data) }
+                Task { @MainActor in self?.receivedFromTCP(data) }
             }
             if !done && error == nil { self?.receiveLoop(conn) }
         }
     }
 
     func disconnect() {
-        browser?.cancel()
-        browser = nil
         connection?.cancel()
         connection = nil
         isReady = false
