@@ -21,35 +21,45 @@ final class CommandBuilderViewModel: ObservableObject {
     func loadHelp() async {
         let cmd = baseCommand.trimmingCharacters(in: .whitespaces)
         guard !cmd.isEmpty else { return }
-        // Preserve whatever flags were already in commandText so they survive the reload
         let priorText = commandText.trimmingCharacters(in: .whitespaces)
         isLoading = true
         error = nil
-        let stub = UserDefaults.standard.object(forKey: "stubCommandFlow") as? Bool ?? true
-        var lines = stub
-            ? await engine.captureOutputSilent("\(cmd) --help")
-            : await engine.captureCommandHelp(cmd)
-        var help = HelpParser.parse(lines)
 
-        // Fallback: scripts and some commands use -h instead of --help
-        if help.options.isEmpty {
-            lines = await engine.captureOutputSilent("\(cmd) -h")
-            help = HelpParser.parse(lines)
-        }
+        let help = await probeHelp(for: cmd)
 
-        if help.options.isEmpty {
-            error = "No options found — type flags manually or check the command."
+        if !help.hasContent {
+            error = "No help text found — type arguments manually or check the command."
         } else {
             commandHelp = help
             bools = [:]
             strings = [:]
-            // Restore priorText so flags from a favorite survive the reload.
-            // commandText may be unchanged (same string), so onChange won't fire —
-            // call syncFromText() directly to guarantee options are populated.
             commandText = priorText.hasPrefix(cmd) ? priorText : cmd
             syncFromText()
         }
         isLoading = false
+    }
+
+    /// Native client prefers `--help`; Lua/user scripts usually only implement `-h`.
+    private func probeHelp(for cmd: String) async -> CommandHelp {
+        let isScript = cmd.lowercased().hasPrefix("script ")
+        let stub = UserDefaults.standard.object(forKey: "stubCommandFlow") as? Bool ?? true
+
+        let probes: [String]
+        if isScript {
+            probes = ["\(cmd) -h", "\(cmd) --help"]
+        } else if stub {
+            probes = ["\(cmd) --help", "\(cmd) -h"]
+        } else {
+            return HelpParser.parse(await engine.captureCommandHelp(cmd))
+        }
+
+        var best = CommandHelp(summary: "", usage: "", options: [], examples: [])
+        for probe in probes {
+            let parsed = HelpParser.parse(await engine.captureOutputSilent(probe))
+            if parsed.rank > best.rank { best = parsed }
+            if parsed.options.count >= 2 { break }
+        }
+        return best
     }
 
     // Rebuild commandText from current option state — called after every option row change
@@ -140,6 +150,17 @@ struct CommandBuilderView: View {
                 }
 
                 if let help = vm.commandHelp {
+                    if !help.summary.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("ABOUT").hackerText().font(.subheadline).opacity(0.8)
+                            Text(help.summary)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .liquidGlassCard()
+                        }
+                    }
+
                     if !help.usage.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("USAGE").hackerText().font(.subheadline).opacity(0.8)
@@ -151,7 +172,9 @@ struct CommandBuilderView: View {
                         }
                     }
 
-                    let opts = help.options.filter { $0.primaryFlag != "--help" }
+                    let opts = help.options.filter { opt in
+                        !opt.flags.allSatisfy { $0 == "-h" || $0 == "--help" }
+                    }
                     if !opts.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("OPTIONS").hackerText().font(.subheadline).opacity(0.8)

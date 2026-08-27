@@ -110,47 +110,87 @@ struct OptionDef: Identifiable {
 }
 
 struct CommandHelp {
+    let summary: String
     let usage: String
     let options: [OptionDef]
     let examples: [String]
+
+    var hasContent: Bool {
+        !summary.isEmpty || !usage.isEmpty || !options.isEmpty || !examples.isEmpty
+    }
+
+    /// Prefer richer parses when probing `-h` vs `--help`.
+    var rank: Int {
+        options.count * 4
+            + (usage.isEmpty ? 0 : 2)
+            + (summary.isEmpty ? 0 : 1)
+            + examples.count
+    }
 }
 
 enum HelpParser {
     static func parse(_ lines: [String]) -> CommandHelp {
+        var summaryLines: [String] = []
         var usage = ""
         var options: [OptionDef] = []
         var examples: [String] = []
         var section = ""
 
         for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = stripAnsi(line).trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !isClientChrome(trimmed) else { continue }
             let lower = trimmed.lowercased()
 
             // Native pm3: "usage:", "options:", "examples/notes"
             // Lua scripts: bare "Usage", "Arguments", "Example usage"
-            if lower == "usage" || lower.hasPrefix("usage:") { section = "usage"; continue }
-            if lower.hasPrefix("options:") || lower.hasPrefix("arguments") { section = "options"; continue }
-            if lower.hasPrefix("example") || lower.hasPrefix("notes") { section = "examples"; continue }
+            // Python: "Usage: foo <bar>" on one line, or argparse "usage:" / "options:"
+            if lower == "usage" || lower.hasPrefix("usage:") {
+                section = "usage"
+                if lower.hasPrefix("usage:") {
+                    let rest = trimmed.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                    if !rest.isEmpty { usage = rest }
+                }
+                continue
+            }
+            if lower.hasPrefix("options:") || lower.hasPrefix("optional arguments")
+                || lower == "arguments" || lower.hasPrefix("arguments:") {
+                section = "options"
+                continue
+            }
+            if lower.hasPrefix("example") || lower.hasPrefix("notes") {
+                section = "examples"
+                continue
+            }
 
             switch section {
             case "usage":
-                if !trimmed.isEmpty { usage = trimmed }
+                if usage.isEmpty {
+                    usage = trimmed
+                } else {
+                    summaryLines.append(trimmed)
+                }
             case "options":
-                if let opt = parseLine(line) { options.append(opt) }
+                if let opt = parseLine(trimmed) { options.append(opt) }
             case "examples":
-                if !trimmed.isEmpty && !trimmed.hasSuffix(":") { examples.append(trimmed) }
-            default: break
+                if !trimmed.hasSuffix(":") { examples.append(trimmed) }
+            default:
+                summaryLines.append(trimmed)
             }
         }
 
-        // Lua scripts list bare flags ("-u  description") in Arguments without <arg> labels,
-        // but the usage line does show which flags take values ("-u <uid>").
-        // Promote those flags from .none to their proper arg type.
         if !options.isEmpty && !usage.isEmpty {
             options = applyUsageArgTypes(to: options, usageLine: usage)
         }
 
-        return CommandHelp(usage: usage, options: options, examples: examples)
+        if options.isEmpty, !usage.isEmpty {
+            options = positionalsFromUsage(usage)
+        }
+
+        let summary = summaryLines
+            .filter { !$0.hasPrefix("script run") }
+            .joined(separator: "\n")
+
+        return CommandHelp(summary: summary, usage: usage, options: options, examples: examples)
     }
 
     private static func applyUsageArgTypes(to options: [OptionDef], usageLine: String) -> [OptionDef] {
@@ -158,9 +198,9 @@ enum HelpParser {
         var usageArgs: [String: String] = [:]
         let tokens = usageLine.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
         for i in 0..<tokens.count {
-            let tok = tokens[i]
+            let tok = tokens[i].trimmingCharacters(in: CharacterSet(charactersIn: "[]()"))
             guard tok.hasPrefix("-"), i + 1 < tokens.count else { continue }
-            let next = tokens[i + 1]
+            let next = tokens[i + 1].trimmingCharacters(in: CharacterSet(charactersIn: "[]()"))
             if next.hasPrefix("<") {
                 usageArgs[tok] = next.trimmingCharacters(in: CharacterSet(charactersIn: "<>()"))
             }
@@ -171,24 +211,90 @@ enum HelpParser {
             guard opt.argType == .none else { return opt }
             for flag in opt.flags {
                 if let label = usageArgs[flag] {
-                    let argType: OptionDef.ArgType
-                    switch label.lowercased() {
-                    case "hex", "key", "passwd", "signature", "otp", "version", "pack", "gtu", "ats", "atqa", "sak":
-                        argType = .hex
-                    case "dec", "n", "num", "type":
-                        argType = .decimal
-                    case "fn", "file", "filename":
-                        argType = .file
-                    case "bin":
-                        argType = .binary
-                    default:
-                        argType = .string
-                    }
-                    return OptionDef(flags: opt.flags, argType: argType, argLabel: label, description: opt.description)
+                    return OptionDef(
+                        flags: opt.flags,
+                        argType: typeForArgLabel(label),
+                        argLabel: label,
+                        description: opt.description
+                    )
                 }
             }
             return opt
         }
+    }
+
+    /// Unattached `<label>` tokens in a usage line, so scripts like
+    /// `xorcheck.py <ID Byte1> <ID Byte2> ... <LRC>` still get builder fields.
+    private static func positionalsFromUsage(_ usageLine: String) -> [OptionDef] {
+        let tokens = usageLine.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        var labels: [String] = []
+        var i = 0
+        while i < tokens.count {
+            let tok = tokens[i].trimmingCharacters(in: CharacterSet(charactersIn: "[]()"))
+            if tok.hasPrefix("-") {
+                if i + 1 < tokens.count, tokens[i + 1].hasPrefix("<") { i += 2; continue }
+                i += 1
+                continue
+            }
+            if tok.hasPrefix("<"), tok.contains(">") {
+                let inner = tok.trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
+                if !inner.isEmpty, inner != "...", inner.lowercased() != "params" {
+                    labels.append(inner)
+                }
+            }
+            i += 1
+        }
+
+        // Variadic / spacey labels collapse to one freeform field so the user
+        // can type the rest of argv as shown in usage.
+        let messy = labels.contains(where: { $0.contains(" ") }) || usageLine.contains("...")
+        if messy, !labels.isEmpty {
+            return [OptionDef(
+                flags: ["<arguments>"],
+                argType: .string,
+                argLabel: "arguments",
+                description: "Arguments as shown in usage"
+            )]
+        }
+
+        return labels.map { label in
+            OptionDef(
+                flags: ["<\(label)>"],
+                argType: typeForArgLabel(label),
+                argLabel: label,
+                description: label
+            )
+        }
+    }
+
+    private static func typeForArgLabel(_ label: String) -> OptionDef.ArgType {
+        switch label.lowercased() {
+        case "hex", "key", "passwd", "signature", "otp", "version", "pack", "gtu", "ats", "atqa", "sak":
+            return .hex
+        case "dec", "n", "num", "type":
+            return .decimal
+        case "fn", "file", "filename":
+            return .file
+        case "bin":
+            return .binary
+        default:
+            return .string
+        }
+    }
+
+    private static func isClientChrome(_ trimmed: String) -> Bool {
+        if trimmed.hasPrefix("[") {
+            let tag = trimmed.dropFirst().first
+            if tag == "+" || tag == "=" || tag == "-" || tag == "!"
+                || tag == "?" || tag == "/" || tag == "\\" || tag == "*" {
+                return true
+            }
+        }
+        let lower = trimmed.lowercased()
+        return lower.hasPrefix("executing python")
+            || lower.hasPrefix("executing lua")
+            || lower.hasPrefix("finished ")
+            || lower.hasPrefix("args ")
     }
 
     // MARK: - Line parser
@@ -206,8 +312,9 @@ enum HelpParser {
             return parsePositional(trimmed)
         }
 
-        // Split flags from description at 3+ consecutive whitespace chars
-        guard let sepRange = trimmed.range(of: #"\s{3,}"#, options: .regularExpression) else { return nil }
+        // pm3 uses 3+ spaces; argparse / lua often use 2
+        guard let sepRange = trimmed.range(of: #"\s{3,}"#, options: .regularExpression)
+                ?? trimmed.range(of: #"\s{2,}"#, options: .regularExpression) else { return nil }
         var flagStr = String(trimmed[..<sepRange.lowerBound])
         let description = String(trimmed[sepRange.upperBound...]).trimmingCharacters(in: .whitespaces)
         guard !description.isEmpty else { return nil }
@@ -232,21 +339,13 @@ enum HelpParser {
 
         guard !tokens.isEmpty else { return nil }
 
-        let argType: OptionDef.ArgType
-        switch argLabel?.lowercased() {
-        case "hex":    argType = .hex
-        case "dec":    argType = .decimal
-        case "fn":     argType = .file
-        case "bin":    argType = .binary
-        case .some(_): argType = .string     // txt, format, name, uid, …
-        case .none:    argType = .none
-        }
-
-        return OptionDef(flags: tokens, argType: argType, argLabel: argLabel, description: cleanDesc)
+        let resolved: OptionDef.ArgType = argLabel.map { typeForArgLabel($0) } ?? .none
+        return OptionDef(flags: tokens, argType: resolved, argLabel: argLabel, description: cleanDesc)
     }
 
     private static func parsePositional(_ trimmed: String) -> OptionDef? {
-        guard let sepRange = trimmed.range(of: #"\s{3,}"#, options: .regularExpression) else { return nil }
+        guard let sepRange = trimmed.range(of: #"\s{3,}"#, options: .regularExpression)
+                ?? trimmed.range(of: #"\s{2,}"#, options: .regularExpression) else { return nil }
         let flagStr = String(trimmed[..<sepRange.lowerBound]).trimmingCharacters(in: .whitespaces)
         let description = String(trimmed[sepRange.upperBound...]).trimmingCharacters(in: .whitespaces)
         guard !description.isEmpty else { return nil }

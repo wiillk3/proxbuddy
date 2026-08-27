@@ -339,6 +339,18 @@ for dir in luascripts lualibs dictionaries pyscripts cmdscripts; do
     fi
 done
 
+# These two Lua modules are generated (gitignored in Iceman) by the desktop
+# Makefile. CMake declares the rules but does not attach them to the target,
+# so an iOS-only build never produces them — and `require('pm3_cmd')` fails.
+echo "==> Generating Lua command tables..."
+mkdir -p "$PM3_RES_DEST/lualibs"
+awk -f "$PM3_SRC/client/pm3_cmd_h2lua.awk" \
+    "$PM3_SRC/include/pm3_cmd.h" \
+    > "$PM3_RES_DEST/lualibs/pm3_cmd.lua"
+awk -f "$PM3_SRC/client/default_keys_dic2lua.awk" \
+    "$PM3_SRC/client/dictionaries/mfc_default_keys.dic" \
+    > "$PM3_RES_DEST/lualibs/mfc_default_keys.lua"
+
 # ── Install iOS Python shim into pyscripts ────────────────────────────────────
 # Copies pm3_resources_ios.py and patches key scripts to use it on iOS.
 
