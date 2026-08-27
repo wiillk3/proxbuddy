@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import os
 
 private let terminalSignposter = OSSignposter(subsystem: "rfid.spot.proxbuddy", category: "Terminal")
@@ -16,25 +17,40 @@ struct TerminalLine: Identifiable, @unchecked Sendable, Equatable {
         self.raw = raw
         self.timestamp = timestamp
         self.isInput = isInput
-        self.hint = TerminalLine.extractHint(from: raw)
-        self.nsAttributedText = ANSIParser.parseNS(
+        let hint = TerminalLine.extractHint(from: raw)
+        self.hint = hint
+        let parsed = ANSIParser.parseNS(
             raw,
             fontSize: 13,
             defaultColor: isInput ? ANSIParser.inputDefaultUI : ANSIParser.outputDefaultUI
         )
+        self.nsAttributedText = hint.map { TerminalLine.markingHint(parsed, hint: $0) } ?? parsed
     }
 
     private static func extractHint(from raw: String) -> String? {
-        guard raw.contains("[?]") else { return nil }
-        if let first = raw.firstIndex(of: "`"), let last = raw[raw.index(after: first)...].firstIndex(of: "`") {
-            let cmd = String(raw[raw.index(after: first)..<last])
+        let clean = ANSIParser.strip(raw)
+        guard clean.contains("[?]") || clean.localizedCaseInsensitiveContains("Hint:") else { return nil }
+        if let first = clean.firstIndex(of: "`"), let last = clean[clean.index(after: first)...].firstIndex(of: "`") {
+            let cmd = String(clean[clean.index(after: first)..<last])
             if !cmd.isEmpty { return cmd }
         }
-        if let first = raw.firstIndex(of: "'"), let last = raw[raw.index(after: first)...].firstIndex(of: "'") {
-            let cmd = String(raw[raw.index(after: first)..<last])
+        if let first = clean.firstIndex(of: "'"), let last = clean[clean.index(after: first)...].firstIndex(of: "'") {
+            let cmd = String(clean[clean.index(after: first)..<last])
             if !cmd.isEmpty { return cmd }
         }
         return nil
+    }
+
+    private static func markingHint(_ attributed: NSAttributedString, hint: String) -> NSAttributedString {
+        let mutable = NSMutableAttributedString(attributedString: attributed)
+        let haystack = mutable.string
+        for target in ["`\(hint)`", "'\(hint)'", hint] {
+            guard let range = haystack.range(of: target) else { continue }
+            let ns = NSRange(range, in: haystack)
+            mutable.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: ns)
+            break
+        }
+        return mutable
     }
 
     static func == (lhs: TerminalLine, rhs: TerminalLine) -> Bool {

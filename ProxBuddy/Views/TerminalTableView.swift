@@ -178,6 +178,13 @@ struct TerminalTableView: UIViewRepresentable {
                 }
             }
         }
+
+        func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+            tableView.deselectRow(at: indexPath, animated: false)
+            guard let id = dataSource?.itemIdentifier(for: indexPath),
+                  let hint = lineMap[id]?.hint else { return }
+            parent.onHintTap(hint)
+        }
     }
 }
 
@@ -190,11 +197,11 @@ final class TerminalLineCell: UITableViewCell, UIContextMenuInteractionDelegate 
     private let textStack = UIStackView()
     private let timestampLabel = UILabel()
     private let contentLabel = UILabel()
-    private let hintButton = UIButton(type: .system)
 
     private var currentLine: TerminalLine?
     private var onHintTapCallback: ((String) -> Void)?
     private var onHintLongPressCallback: ((String) -> Void)?
+    private var ignoreNextHintTap = false
 
     private static let timeFormatter: DateFormatter = {
         let fmt = DateFormatter()
@@ -238,23 +245,7 @@ final class TerminalLineCell: UITableViewCell, UIContextMenuInteractionDelegate 
 
         textStack.addArrangedSubview(timestampLabel)
         textStack.addArrangedSubview(contentLabel)
-
-        // Hint Button Setup
-        hintButton.titleLabel?.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .medium)
-        hintButton.setTitleColor(UIColor(red: 0.0, green: 0.85, blue: 0.2, alpha: 1.0), for: .normal)
-        hintButton.backgroundColor = UIColor(red: 0.0, green: 0.85, blue: 0.2, alpha: 0.15)
-        hintButton.layer.cornerRadius = 6
-        hintButton.layer.borderWidth = 1
-        hintButton.layer.borderColor = UIColor(red: 0.0, green: 0.85, blue: 0.2, alpha: 0.4).cgColor
-        hintButton.contentEdgeInsets = UIEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
-        hintButton.addTarget(self, action: #selector(hintButtonTapped), for: .touchUpInside)
-
-        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(hintButtonLongPressed(_:)))
-        longPress.minimumPressDuration = 0.5
-        hintButton.addGestureRecognizer(longPress)
-
         containerStack.addArrangedSubview(textStack)
-        containerStack.addArrangedSubview(hintButton)
 
         NSLayoutConstraint.activate([
             containerStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 1),
@@ -263,6 +254,13 @@ final class TerminalLineCell: UITableViewCell, UIContextMenuInteractionDelegate 
             containerStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10),
             textStack.widthAnchor.constraint(equalTo: containerStack.widthAnchor)
         ])
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(hintTextTapped))
+        contentView.addGestureRecognizer(tap)
+
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(hintTextLongPressed(_:)))
+        longPress.minimumPressDuration = 0.5
+        contentView.addGestureRecognizer(longPress)
 
         let interaction = UIContextMenuInteraction(delegate: self)
         addInteraction(interaction)
@@ -282,22 +280,20 @@ final class TerminalLineCell: UITableViewCell, UIContextMenuInteractionDelegate 
         }
 
         contentLabel.attributedText = line.nsAttributedText
-
-        if let hint = line.hint {
-            hintButton.isHidden = false
-            hintButton.setTitle("▶ \(hint)", for: .normal)
-        } else {
-            hintButton.isHidden = true
-        }
     }
 
-    @objc private func hintButtonTapped() {
+    @objc private func hintTextTapped() {
+        if ignoreNextHintTap {
+            ignoreNextHintTap = false
+            return
+        }
         guard let hint = currentLine?.hint else { return }
         onHintTapCallback?(hint)
     }
 
-    @objc private func hintButtonLongPressed(_ gesture: UILongPressGestureRecognizer) {
+    @objc private func hintTextLongPressed(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began, let hint = currentLine?.hint else { return }
+        ignoreNextHintTap = true
         onHintLongPressCallback?(hint)
     }
 
@@ -316,7 +312,20 @@ final class TerminalLineCell: UITableViewCell, UIContextMenuInteractionDelegate 
                 UIPasteboard.general.string = clean
             }
 
-            return UIMenu(title: "", children: [copyClean, copyRaw])
+            let insertHint: UIAction? = {
+                guard let hint = self.currentLine?.hint else { return nil }
+                return UIAction(title: "Insert \"\(hint)\"", image: UIImage(systemName: "text.insert")) { [weak self] _ in
+                    self?.onHintTapCallback?(hint)
+                }
+            }()
+            let openBuilder: UIAction? = {
+                guard let hint = self.currentLine?.hint else { return nil }
+                return UIAction(title: "Open in Builder", image: UIImage(systemName: "slider.horizontal.3")) { [weak self] _ in
+                    self?.onHintLongPressCallback?(hint)
+                }
+            }()
+            let actions = [insertHint, openBuilder, copyClean, copyRaw].compactMap { $0 }
+            return UIMenu(title: "", children: actions)
         }
     }
 }
