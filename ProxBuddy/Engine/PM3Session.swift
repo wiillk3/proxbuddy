@@ -25,6 +25,7 @@ final class PM3Session: ObservableObject, Identifiable {
     @Published private(set) var statusMessage = "Stopped"
     @Published private(set) var batteryLevel: Int? = nil
     @Published private(set) var isTransportReady = false
+    private var gaugeSoC: Int?
 
     let runner = BinaryRunner()
     let engine = TerminalEngine()
@@ -62,6 +63,14 @@ final class PM3Session: ObservableObject, Identifiable {
         refreshDerivedStatus()
     }
 
+    func noteGaugeSoC(_ soc: Int) {
+        guard (0...100).contains(soc) else { return }
+        if gaugeSoC != soc {
+            gaugeSoC = soc
+            refreshDerivedStatus()
+        }
+    }
+
     // MARK: - Status
 
     private func refreshDerivedStatus() {
@@ -84,11 +93,12 @@ final class PM3Session: ObservableObject, Identifiable {
                 nextStatus = "BLE: \(bleTransport.connectionState.rawValue)"
             }
             nextReady = bleTransport.connectionState == .ready
-            nextBattery = bleTransport.batteryLevel
+            let bleBatt = bleTransport.batteryLevel.flatMap { (0...100).contains($0) ? $0 : nil }
+            nextBattery = bleBatt ?? gaugeSoC
         case .wifiDirect:
             nextStatus = tcpTransport.statusMessage
             nextReady = true
-            nextBattery = nil
+            nextBattery = bleTransport.batteryLevel.flatMap { (0...100).contains($0) ? $0 : nil } ?? gaugeSoC
         }
         if statusMessage != nextStatus { statusMessage = nextStatus }
         if isTransportReady != nextReady { isTransportReady = nextReady }

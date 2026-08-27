@@ -334,11 +334,14 @@ extension BLETransport: CBPeripheralDelegate {
 
         if characteristic.uuid == PM5BLE.sppDataCharUUID || characteristic.uuid == PM5BLE.nusTxCharUUID {
             MainActor.assumeIsolated { receivedFromBLE(data) }
-        } else if characteristic.uuid == PM5BLE.batteryLevelCharUUID {
-            if let firstByte = data.first {
-                let level = Int(firstByte)
-                MainActor.assumeIsolated { self.batteryLevel = level }
+            } else if characteristic.uuid == PM5BLE.batteryLevelCharUUID {
+                if let firstByte = data.first {
+                    let level = Int(firstByte)
+                    // BAS 0x2A19 is 0–100. 0xFF means "unknown" on the PM5 BWM.
+                    MainActor.assumeIsolated {
+                        self.batteryLevel = (0...100).contains(level) ? level : nil
+                    }
+                }
             }
-        }
     }
 }
