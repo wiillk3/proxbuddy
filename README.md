@@ -63,4 +63,4 @@ Open the generated `ProxBuddy.xcodeproj` in Xcode.
 - **Proxmark 5 Support**: Native BLE and Wi-Fi Direct to the PM5 BWM module.
 
 ## License
-Private repository. All rights reserved.
+ProxBuddy is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE) and [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md).
