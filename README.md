@@ -14,10 +14,12 @@ Built with SwiftUI, ProxBuddy embeds the actual `proxmark3` C client directly in
 
 ## Prerequisites
 
-- **Xcode 15+** and macOS
+- **Xcode 26+** and macOS
 - **Homebrew**
 - **XcodeGen** (for generating the Xcode project file)
 - **Proxmark3 RRG/Iceman source code** (required for compiling the iOS library)
+
+Do not put GNU `ar` ahead of Apple’s on `PATH` (Homebrew `binutils` is the usual culprit). The iOS build must archive with Xcode’s `ar`.
 
 ## Getting Started
 
@@ -38,6 +40,13 @@ This script does the heavy lifting:
 - Packages the Python standard library into a highly-optimized `python311.zip` archive.
 - Bundles the official Proxmark3 `lua`, `py`, and `cmd` scripts directly into the `ProxBuddy/Resources` folder.
 - Compiles the client into a single `.dylib`.
+
+If the link step fails with `archive member '//' not a mach-o file` in `libcrypto.a`, a GNU `ar` (often Homebrew `binutils`) built the OpenSSL cache. Unlink it and rebuild from scratch:
+
+```bash
+brew unlink binutils   # if installed
+./build_pm3_ios.sh --clean ~/proxmark3
+```
 
 ### 2. Generate the Xcode Project
 This project uses [XcodeGen](https://github.com/yonaskolb/XcodeGen) to manage the project file, which keeps the git history clean and prevents merge conflicts. 

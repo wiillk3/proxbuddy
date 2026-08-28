@@ -75,7 +75,30 @@ IOS_STRIP="$(xcrun --sdk iphoneos -f strip)"
 
 echo "==> iOS SDK : $IOS_SDK"
 echo "==> Clang   : $IOS_CC"
+echo "==> ar      : $IOS_AR"
 echo "==> PM3 src : $PM3_SRC"
+
+# Homebrew binutils/llvm put a GNU `ar` on PATH. GNU archives contain a `//`
+# symbol-index member that Apple ld rejects:
+#   ld: archive member '//' not a mach-o file in '.../libcrypto.a'
+export PATH="/usr/bin:$(dirname "$IOS_AR"):$PATH"
+export AR="$IOS_AR"
+export RANLIB="$IOS_RANLIB"
+export CC="$IOS_CC"
+export CXX="$IOS_CXX"
+
+is_apple_archive() {
+    local lib="$1"
+    [ -f "$lib" ] || return 1
+    file "$lib" | grep -q "ar archive" || return 1
+    local members
+    members="$("$IOS_AR" -t "$lib" 2>/dev/null || true)"
+    [ -n "$members" ] || return 1
+    # GNU ar's SysV index / long-name table: Apple ld rejects these members.
+    echo "$members" | grep -qx '//' && return 1
+    echo "$members" | grep -qx '/' && return 1
+    return 0
+}
 
 CFLAGS="-target ${TRIPLE} -isysroot ${IOS_SDK} -Os -D__IOS_PROHIBITED= -DLIBPM3 -Wno-error=unused-but-set-variable"
 CXXFLAGS="$CFLAGS -std=c++11"
@@ -145,10 +168,10 @@ OPENSSL_SRC="$BUILD_DIR/openssl-src"
 OPENSSL_INSTALL="$BUILD_DIR/openssl-ios"
 OPENSSL_LIB="$OPENSSL_INSTALL/lib/libcrypto.a"
 
-if [ ! -f "$OPENSSL_LIB" ]; then
+if ! is_apple_archive "$OPENSSL_LIB"; then
     echo "==> Downloading OpenSSL ${OPENSSL_VERSION}..."
-    rm -rf "$OPENSSL_SRC"
-    curl -sL "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
+    rm -rf "$OPENSSL_SRC" "$OPENSSL_INSTALL"
+    curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
         -o "$BUILD_DIR/openssl.tar.gz"
     tar -xzf "$BUILD_DIR/openssl.tar.gz" -C "$BUILD_DIR"
     mv "$BUILD_DIR/openssl-${OPENSSL_VERSION}" "$OPENSSL_SRC"
@@ -156,18 +179,26 @@ if [ ! -f "$OPENSSL_LIB" ]; then
     echo "==> Building OpenSSL for iOS arm64 (libcrypto only)..."
     (
         cd "$OPENSSL_SRC"
-        # OpenSSL's Configure script has native iOS cross-compilation support
+        # Force Apple ar/ranlib — OpenSSL's makefile otherwise picks GNU ar from PATH.
         ./Configure ios64-xcrun \
             --prefix="$OPENSSL_INSTALL" \
             --openssldir="$OPENSSL_INSTALL/ssl" \
             no-shared no-tests no-ui-console no-engine no-async \
-            -fembed-bitcode \
             "-isysroot ${IOS_SDK}" \
-            "-mios-version-min=${IOS_TARGET}"
+            "-miphoneos-version-min=${IOS_TARGET}" \
+            AR="$IOS_AR" RANLIB="$IOS_RANLIB" CC="$IOS_CC"
 
-        make -j"$(sysctl -n hw.ncpu)" build_libs
-        make install_dev
+        make -j"$(sysctl -n hw.ncpu)" AR="$IOS_AR" RANLIB="$IOS_RANLIB" build_libs
+        make AR="$IOS_AR" RANLIB="$IOS_RANLIB" install_dev
     )
+
+    if ! is_apple_archive "$OPENSSL_LIB"; then
+        echo "ERROR: $OPENSSL_LIB is not a Mach-O archive Apple ld can link."
+        echo "       file says: $(file "$OPENSSL_LIB")"
+        echo "       If Homebrew binutils is installed, run: brew unlink binutils"
+        echo "       then re-run: $0 --clean"
+        exit 1
+    fi
 fi
 
 # ── Python for iOS (BeeWare Python-Apple-support) ─────────────────────────────
