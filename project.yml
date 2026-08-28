@@ -35,6 +35,10 @@ targets:
           - "Resources/cmdscripts"
           - "Resources/lualibs"
           - "Resources/dictionaries"
+          - "Python.xcframework"
+          - "Resources/python311.zip"
+          - "Resources/python313.zip"
+          - "Resources/tools"
         type: group
       - path: ProxBuddy/Resources/luascripts
         type: folder
@@ -55,11 +59,7 @@ targets:
         basedOnDependencyAnalysis: false
         script: |
           set -euo pipefail
-          source "$PROJECT_DIR/ProxBuddy/Python.xcframework/build/utils.sh"
-          install_python ProxBuddy/Python.xcframework
-          # Override iOS os_log stdout so script print() hits the captured C fds.
-          cp "$PROJECT_DIR/ProxBuddy/Resources/sitecustomize.py" \
-             "$CODESIGNING_FOLDER_PATH/python/lib/python3.11/sitecustomize.py"
+          bash "$PROJECT_DIR/scripts/install_python_ios.sh"
 
     info:
       path: ProxBuddy/Info.plist

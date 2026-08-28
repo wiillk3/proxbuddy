@@ -71,7 +71,8 @@ ProxBuddy/Resources/dictionaries/
 ProxBuddy/Resources/pyscripts/
 ProxBuddy/Resources/cmdscripts/
 ProxBuddy/Resources/pm3client
-ProxBuddy/Resources/tools/
+ProxBuddy/Resources/tools/*
+!ProxBuddy/Resources/tools/.gitkeep
 *.dylib
 
 # MockNUS
@@ -84,3 +85,4 @@ ProxBuddy/AIContexts/
 # Python Embedded Framework
 ProxBuddy/Python.xcframework/
 ProxBuddy/Resources/python311.zip
+ProxBuddy/Resources/python313.zip

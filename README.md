@@ -24,7 +24,7 @@ Do not put GNU `ar` ahead of Apple’s on `PATH` (Homebrew `binutils` is the usu
 ## Getting Started
 
 ### 1. Compile the Proxmark3 iOS Library & Python Dependencies
-ProxBuddy relies on a custom dynamic library (`libpm3client.dylib`) built from the official Proxmark3 source code, along with an embedded Python 3.11 framework.
+ProxBuddy relies on a custom dynamic library (`libpm3client.dylib`) built from the official Proxmark3 source code, along with an embedded Python 3.13 framework.
 
 1. Clone the official Iceman Proxmark3 repository alongside ProxBuddy:
 ```bash
@@ -37,7 +37,7 @@ git clone https://github.com/RfidResearchGroup/proxmark3.git ~/proxmark3
 This script does the heavy lifting:
 - Configures CMake for an iOS/Aarch64 target.
 - Downloads BeeWare's `Python-Apple-support` framework for iOS.
-- Packages the Python standard library into a highly-optimized `python311.zip` archive.
+- Downloads BeeWare’s iOS Python 3.13 XCFramework (stdlib is copied into the app at Xcode build time).
 - Bundles the official Proxmark3 `lua`, `py`, and `cmd` scripts directly into the `ProxBuddy/Resources` folder.
 - Compiles the client into a single `.dylib`.
 
@@ -61,6 +61,8 @@ Run the following command in the root of the repository to generate `ProxBuddy.x
 xcodegen
 ```
 *Note: You must run the build script in Step 1 **before** running `xcodegen`, so that XcodeGen can properly link the downloaded Python framework and script directories!*
+
+If Xcode’s **Install Python stdlib** phase fails with `rsync` / `(l)stat` / `ios-arm64/lib`, pull this repo, run `xcodegen` again, and rebuild. That phase must not use Xcode’s wrapped `rsync`.
 
 ### 3. Build and Run
 Open the generated `ProxBuddy.xcodeproj` in Xcode.

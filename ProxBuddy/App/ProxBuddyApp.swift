@@ -20,14 +20,19 @@ struct ProxBuddyApp: App {
             setenv("LANG", "en_US.UTF-8", 1)
         }
 
-        // BeeWare install_python (Xcode build phase) copies stdlib into
-        // <App>.app/python/lib/python3.11 and rewrites lib-dynload .so files
+        // The Install Python stdlib build phase copies stdlib into
+        // <App>.app/python/lib/python3.X and rewrites lib-dynload .so files
         // into Frameworks/*.framework + .fwork stubs. CPython bootstraps
         // encodings from PYTHONHOME *before* PYTHONPATH is applied, so this
-        // layout has to match getpath's {home}/lib/python3.11 exactly.
+        // layout has to match getpath's {home}/lib/python3.X exactly.
         let resourcePath = Bundle.main.resourcePath ?? ""
         let pyHome = (resourcePath as NSString).appendingPathComponent("python")
-        let pyStdLib = (pyHome as NSString).appendingPathComponent("lib/python3.11")
+        let libRoot = (pyHome as NSString).appendingPathComponent("lib")
+        let versionDir = (try? FileManager.default.contentsOfDirectory(atPath: libRoot))?
+            .filter { $0.hasPrefix("python3.") }
+            .sorted()
+            .last ?? "python3.13"
+        let pyStdLib = (libRoot as NSString).appendingPathComponent(versionDir)
         let dynLoad = (pyStdLib as NSString).appendingPathComponent("lib-dynload")
         let encodingsInit = (pyStdLib as NSString).appendingPathComponent("encodings/__init__.py")
 
