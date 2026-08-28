@@ -22,6 +22,7 @@ Built with SwiftUI, ProxBuddy embeds the actual `proxmark3` C client directly in
 Do not put GNU `ar` ahead of Apple’s on `PATH` (Homebrew `binutils` is the usual culprit). The iOS build must archive with Xcode’s `ar`.
 
 ## Getting Started
+(this has been tested on 1 other computer that isnt mine, please report any build errors you run into)
 
 ### 1. Compile the Proxmark3 iOS Library & Python Dependencies
 ProxBuddy relies on a custom dynamic library (`libpm3client.dylib`) built from the official Proxmark3 source code, along with an embedded Python 3.13 framework.

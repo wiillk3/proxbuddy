@@ -1,7 +1,5 @@
 # ProxBuddy TODOs
 
-In the middle of verifying the ability to build on other machines.
-
 ## Hardware
 - [ ] **BLE battery (BAS 0x2A19) reports 0xFF / 255%.** The PM5 BWM advertises the standard Battery Service but the level characteristic is unknown, so the UI falls back to `hw status` → Battery SoC from the BQ27427 gauge. Fix the BWM/BAS path so the device card and connection UI get a live 0–100 reading over BLE without running `hw status`.
 
