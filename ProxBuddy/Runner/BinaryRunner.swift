@@ -5,6 +5,20 @@ typealias PM3OpenFunc        = @convention(c) (UnsafePointer<CChar>?) -> OpaqueP
 typealias PM3ConsoleFunc     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, Bool, Bool) -> Int32
 typealias PM3CloseFunc       = @convention(c) (OpaquePointer?) -> Void
 
+/// Return codes from Iceman `include/pm3_cmd.h`. `quit` / `exit` return `quit`
+/// rather than calling libc `exit()`; `fatal` is how the standalone client
+/// leaves the prompt on an unrecoverable error. Either must end the in-process
+/// session without terminating ProxBuddy.
+enum PM3ClientStatus {
+    static let success: Int32 = 0
+    static let fatal: Int32 = -99   // PM3_EFATAL
+    static let quit: Int32 = -100   // PM3_SQUIT
+
+    static func endsSession(_ rc: Int32) -> Bool {
+        rc == fatal || rc == quit
+    }
+}
+
 // Tiny mutex-protected box for cross-thread mutable state (Sendable-safe).
 final class MutexBox<T>: @unchecked Sendable {
     private let lock = NSLock()
@@ -343,7 +357,15 @@ final class BinaryRunner: ObservableObject {
                     q.isEmpty ? nil : q.removeFirst()
                 }
                 guard let cmd else { continue }
-                cmd.withCString { _ = pm3Console(dev, $0, false, false) }
+                let rc = cmd.withCString { pm3Console(dev, $0, false, false) }
+                if PM3ClientStatus.endsSession(rc) {
+                    let msg = rc == PM3ClientStatus.quit
+                        ? "\n[=] session ended (quit). The app is still running — reconnect from the device screen.\n"
+                        : "\n[!] client session ended. The app is still running — reconnect from the device screen.\n"
+                    fputs(msg, stdout)
+                    fflush(stdout)
+                    break
+                }
                 fputs("\npm3 --> ", stdout)
                 fflush(stdout)
             }

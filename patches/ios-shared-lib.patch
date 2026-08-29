@@ -17,12 +17,13 @@
  
  # If cross-compiled, we need to init source and build.
  if (CMAKE_TOOLCHAIN_FILE)
-@@ -773,7 +777,7 @@ message(STATUS "===================================================================")
+@@ -773,7 +777,8 @@ message(STATUS "===================================================================")
  
  add_definitions(-DHAVE_SNPRINTF)
  
 -add_executable(proxmark3
 +add_library(proxmark3 SHARED
          ${PM3_ROOT}/client/src/proxmark3.c
++        "@PROXBUDDY_PATCHES@/pm3_ios_exit.c"
          ${TARGET_SOURCES}
          ${ADDITIONAL_SRC}

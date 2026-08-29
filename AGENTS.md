@@ -14,8 +14,8 @@ the next build overwrites it. Before changing a file, check it against this tabl
 | Path | Produced by | Where a fix actually belongs |
 |---|---|---|
 | `ProxBuddy.xcodeproj/` | XcodeGen | Edit `project.yml` |
-| `ProxBuddy/Resources/libpm3client.dylib` | `build_pm3_ios.sh` cross-compile | Upstream proxmark3, or `patches/ios-shared-lib.patch` |
-| `ProxBuddy/Resources/tools/*.dylib` | `build_pm3_ios.sh` | Upstream proxmark3 |
+| `ProxBuddy/Resources/libpm3client.dylib` | `build_pm3_ios.sh` cross-compile | Upstream proxmark3, `patches/ios-shared-lib.patch`, or `patches/ios-pm3-no-process-exit.patch` |
+| `ProxBuddy/Resources/tools/*.dylib` | `build_pm3_ios.sh` | Upstream proxmark3, or `patches/pm3_ios_exit.c` |
 | `ProxBuddy/Resources/luascripts/` | Copied from the Iceman clone | Upstream, or a patch step in `build_pm3_ios.sh` |
 | `ProxBuddy/Resources/pyscripts/` | Copied from the Iceman clone | Same |
 | `ProxBuddy/Resources/cmdscripts/` | Copied from the Iceman clone | Same |

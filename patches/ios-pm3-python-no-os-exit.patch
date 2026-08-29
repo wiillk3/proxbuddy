@@ -1,0 +1,21 @@
+--- a/client/src/cmdscript.c
++++ b/client/src/cmdscript.c
+@@ -562,6 +562,18 @@
+             // setup search paths (only once - PySys_GetObject("path") is
+             // prepended each call, so repeating would grow sys.path).
+             set_python_paths();
++            // iOS: the client is in-process. os._exit() is a raw _exit(2) and
++            // would terminate ProxBuddy. Map it to SystemExit, which
++            // Pm3PyRun_SimpleFileNoExit already handles (findbits.py -h).
++            if (PyRun_SimpleString(
++                    "import os\n"
++                    "def _pm3_no_process_exit(code=0):\n"
++                    "    raise SystemExit(code)\n"
++                    "os._exit = _pm3_no_process_exit\n"
++                ) != 0) {
++                PrintAndLogEx(WARNING, "failed to wrap os._exit");
++                PyErr_Clear();
++            }
+             s_py_initialized = true;
+         } else {
+             // Already initialized. Refresh sys.argv for this run and wipe

@@ -1,0 +1,72 @@
+--- a/client/src/pm3.c
++++ b/client/src/pm3.c
+@@ -27,8 +27,17 @@
+ #include "util_posix.h"
+ #include "comms.h"
+ #include "preferences.h"
++#include "pm3_ios_exit.h"
+ 
+ pm3_device_t *pm3_open(const char *port) {
++    // iOS: this runs in-process. Any remaining exit() in callees is redirected
++    // to pm3_ios_exit, which longjmps here instead of killing the app.
++    if (setjmp(pm3_ios_exit_jmp)) {
++        pm3_ios_exit_armed = 0;
++        return NULL;
++    }
++    pm3_ios_exit_armed = 1;
++
+     pm3_init();
+     preferences_load();
+     OpenProxmark(&g_session.current_device, port, false, 20, false, USART_BAUD_RATE);
+@@ -37,17 +46,26 @@
+         CloseProxmark(g_session.current_device);
+     }
+ 
+-    if ((port != NULL) && (!g_session.pm3_present))
+-        exit(EXIT_FAILURE);
++    // iOS: return NULL so the Swift runner can surface the failure instead.
++    if ((port != NULL) && (!g_session.pm3_present)) {
++        pm3_ios_exit_armed = 0;
++        return NULL;
++    }
+ 
+     if (!g_session.pm3_present) {
+         PrintAndLogEx(INFO, _RED_("OFFLINE") " mode");
+     }
+     // For now, there is no real device context:
++    pm3_ios_exit_armed = 0;
+     return g_session.current_device;
+ }
+ 
+ void pm3_close(pm3_device_t *dev) {
++    if (setjmp(pm3_ios_exit_jmp)) {
++        pm3_ios_exit_armed = 0;
++        return;
++    }
++    pm3_ios_exit_armed = 1;
+     // Clean up the port
+     if (g_session.pm3_present) {
+         clearCommandBuffer();
+@@ -56,6 +74,7 @@
+         CloseProxmark(dev);
+     }
+     free_grabber();
++    pm3_ios_exit_armed = 0;
+ }
+ 
+ int pm3_console(pm3_device_t *dev, const char *cmd, bool capture, bool quiet) {
+@@ -68,7 +87,14 @@
+     if (quiet) {
+         g_printAndLog &= ~PRINTANDLOG_PRINT;
+     }
++    if (setjmp(pm3_ios_exit_jmp)) {
++        pm3_ios_exit_armed = 0;
++        g_printAndLog = prev_printAndLog;
++        return PM3_EFATAL;
++    }
++    pm3_ios_exit_armed = 1;
+     int ret = CommandReceived(cmd);
++    pm3_ios_exit_armed = 0;
+     g_printAndLog = prev_printAndLog;
+     return ret;
+ }

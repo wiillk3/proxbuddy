@@ -19,6 +19,8 @@
 #     directly. CMake 3.14+ has native iOS cross-compilation support.
 #   - A git-format patch (patches/ios-shared-lib.patch) converts
 #     add_executable → add_library(SHARED) and injects iOS Python paths.
+#   - patches/ios-pm3-no-process-exit.patch plus pm3_ios_exit.c intercept
+#     libc exit() so the in-process client cannot terminate the iOS app.
 #   - bzip2 and lz4 are pre-built for iOS before cmake runs so cmake's
 #     find_package/find_library picks up the iOS statics.
 #   - readline/ncurses are replaced by linenoise (SKIPREADLINE=1).
@@ -72,7 +74,7 @@ PM3_SRC="$(cd "$PM3_SRC" && pwd)"
 # Ensure we always restore the upstream CMakeLists.txt even if the script fails
 cleanup() {
     if [ -d "$PM3_SRC/.git" ]; then
-        git -C "$PM3_SRC" checkout -- client/CMakeLists.txt client/src/pm3.c 2>/dev/null || true
+        git -C "$PM3_SRC" checkout -- client/CMakeLists.txt client/src/pm3.c client/src/cmdscript.c 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
@@ -297,21 +299,31 @@ if [ ! -f "$PATCH_SRC" ]; then
     exit 1
 fi
 
-# Substitute Python path placeholders in the patch
+# Substitute Python path and ProxBuddy patches-dir placeholders in the patch
 sed -e "s|@PYTHON_INC_DIR@|${PYTHON_INC_DIR}|g" \
     -e "s|@PYTHON_LIB@|${PYTHON_LIB}|g" \
+    -e "s|@PROXBUDDY_PATCHES@|${SCRIPT_DIR}/patches|g" \
     "$PATCH_SRC" > "$PATCH_TMP"
 
 # Apply the patch — will fail loudly if upstream CMakeLists has changed
 git -C "$PM3_SRC" apply "$PATCH_TMP"
 echo "==> Patch applied successfully."
 
-echo "==> Applying iOS pm3_open no-exit patch..."
-git -C "$PM3_SRC" apply "$SCRIPT_DIR/patches/ios-pm3-open-no-exit.patch"
-echo "==> pm3_open patch applied."
+echo "==> Applying iOS no-process-exit patch..."
+git -C "$PM3_SRC" apply "$SCRIPT_DIR/patches/ios-pm3-no-process-exit.patch"
+echo "==> no-process-exit patch applied."
+
+echo "==> Applying iOS Python os._exit wrap patch..."
+git -C "$PM3_SRC" apply "$SCRIPT_DIR/patches/ios-pm3-python-no-os-exit.patch"
+echo "==> Python os._exit wrap applied."
 
 # ── CMake configure ───────────────────────────────────────────────────────────
 # No -DCMAKE_TOOLCHAIN_FILE — that's intentional. See header comment.
+# CLIENT_CFLAGS force-includes the exit() redirect so libc exit() inside the
+# in-process client cannot terminate ProxBuddy (PB-005).
+
+CLIENT_CFLAGS="${CFLAGS} -I${SCRIPT_DIR}/patches -include ${SCRIPT_DIR}/patches/pm3_ios_no_process_exit.h"
+CLIENT_CXXFLAGS="${CXXFLAGS} -I${SCRIPT_DIR}/patches -include ${SCRIPT_DIR}/patches/pm3_ios_no_process_exit.h"
 
 mkdir -p "$BUILD_DIR/cmake"
 cd "$BUILD_DIR/cmake"
@@ -334,8 +346,8 @@ cmake "$PM3_SRC/client" \
     -DSKIPBT=1        \
     -DSKIPPYTHON=0    \
     \
-    -DCMAKE_C_FLAGS="${CFLAGS}" \
-    -DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
+    -DCMAKE_C_FLAGS="${CLIENT_CFLAGS}" \
+    -DCMAKE_CXX_FLAGS="${CLIENT_CXXFLAGS}" \
     -DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}" \
     -DCMAKE_SHARED_LINKER_FLAGS="${LDFLAGS}" \
     \
@@ -432,6 +444,15 @@ if [ -f "$IOS_SHIM" ]; then
     done
 fi
 
+# findbits.py prints usage then os._exit(), which would kill the in-process app
+# even after wrapping os._exit in cmdscript.c (defense in depth / older dylibs).
+FINDBITS="$PM3_RES_DEST/pyscripts/findbits.py"
+if [ -f "$FINDBITS" ] && grep -q 'os._exit' "$FINDBITS"; then
+    echo "==> Patching findbits.py os._exit → sys.exit..."
+    sed -i.bak 's/os\._exit(True)/sys.exit(1)/' "$FINDBITS"
+    rm -f "$FINDBITS.bak"
+fi
+
 # ── Cross-compile helper tools for iOS ────────────────────────────────────────
 # These are standalone C tools that pm3 pyscripts call via subprocess.
 # On iOS, subprocess is blocked — so we compile them as dylibs with renamed
@@ -442,7 +463,8 @@ COMMON_DIR="$PM3_SRC/common"
 TOOLS_OUTPUT="$SCRIPT_DIR/ProxBuddy/Resources/tools"
 mkdir -p "$TOOLS_OUTPUT"
 
-TOOL_CFLAGS="$CFLAGS -I$PM3_SRC/include -I$COMMON_DIR"
+TOOL_CFLAGS="$CFLAGS -I$PM3_SRC/include -I$COMMON_DIR -I${SCRIPT_DIR}/patches -include ${SCRIPT_DIR}/patches/pm3_ios_no_process_exit.h"
+TOOL_WRAP="$SCRIPT_DIR/patches/pm3_ios_exit.c"
 
 # Shared source files for staticnested tools (crapto1 + bucketsort + nested_util)
 CRYPTO_SRCS=(
@@ -459,9 +481,12 @@ for tool in staticnested_1nt staticnested_2nt staticnested_0nt \
             staticnested_2x1nt_rf08s staticnested_2x1nt_rf08s_1key; do
     echo "    Building lib${tool}.dylib..."
     "$IOS_CC" $TOOL_CFLAGS -shared -o "$TOOLS_OUTPUT/lib${tool}.dylib" \
-        -Dmain=${tool}_main \
+        -Dmain=${tool}_main_inner \
+        -DPM3_IOS_TOOL_WRAP=${tool}_main \
+        -DPM3_IOS_TOOL_INNER=${tool}_main_inner \
         "$TOOLS_DIR/mfc/card_only/${tool}.c" \
         "${CRYPTO_SRCS[@]}" \
+        "$TOOL_WRAP" \
         $LDFLAGS -lpthread 2>&1 || {
         echo "    WARNING: Failed to build $tool — skipping"
         continue
@@ -473,9 +498,12 @@ done
 if [ -f "$OPENSSL_LIB" ]; then
     echo "    Building libmfulc_des_brute.dylib..."
     "$IOS_CC" $TOOL_CFLAGS -shared -o "$TOOLS_OUTPUT/libmfulc_des_brute.dylib" \
-        -Dmain=mfulc_des_brute_main \
+        -Dmain=mfulc_des_brute_main_inner \
+        -DPM3_IOS_TOOL_WRAP=mfulc_des_brute_main \
+        -DPM3_IOS_TOOL_INNER=mfulc_des_brute_main_inner \
         -I"$OPENSSL_INSTALL/include" \
         "$TOOLS_DIR/mfulc_des_brute/mfulc_des_brute.c" \
+        "$TOOL_WRAP" \
         $LDFLAGS "$OPENSSL_LIB" -lpthread 2>&1 || {
         echo "    WARNING: Failed to build mfulc_des_brute — skipping"
     }
