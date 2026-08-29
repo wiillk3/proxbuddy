@@ -394,8 +394,14 @@ cp "$PM3_BIN" "$OUTPUT"
 chmod +x "$OUTPUT"
 
 # ── Copy pm3 resources ────────────────────────────────────────────────────────
-# The client locates luascripts, dictionaries etc. relative to itself via
-# whereami(). Bundle them so pm3 finds them at runtime.
+# The client locates luascripts, dictionaries, hardnested tables etc. relative
+# to itself via whereami(). Bundle them so pm3 finds them at runtime.
+#
+# Hardnested tables live under client/resources/ in Iceman. They cannot be
+# bundled as a folder named `resources` — iOS codesign treats that name as
+# reserved and fails with a generic "Command CodeSign failed". We copy them
+# as `pm3-resources/` and PM3HomeSetup symlinks that onto
+# $HOME/.proxmark3/resources/ at launch (a path searchFile already checks).
 
 PM3_RES_SRC="$PM3_SRC/client"
 PM3_RES_DEST="$SCRIPT_DIR/ProxBuddy/Resources"
@@ -407,6 +413,14 @@ for dir in luascripts lualibs dictionaries pyscripts cmdscripts; do
         cp -R "$PM3_RES_SRC/$dir" "$PM3_RES_DEST/$dir"
     fi
 done
+
+if [ -d "$PM3_RES_SRC/resources" ]; then
+    echo "==> Copying resources -> pm3-resources (codesign-safe name)..."
+    rm -rf "$PM3_RES_DEST/pm3-resources" "$PM3_RES_DEST/resources"
+    cp -R "$PM3_RES_SRC/resources" "$PM3_RES_DEST/pm3-resources"
+    # cp from another volume can leave provenance xattrs; strip them.
+    xattr -cr "$PM3_RES_DEST/pm3-resources" 2>/dev/null || true
+fi
 
 # These two Lua modules are generated (gitignored in Iceman) by the desktop
 # Makefile. CMake declares the rules but does not attach them to the target,

@@ -397,6 +397,10 @@ enum PM3HomeSetup {
         }
         #endif
 
+        // Hardnested tables cannot live in the bundle as `resources/` (iOS codesign
+        // reserves that name). Point $HOME/.proxmark3/resources at the bundled copy.
+        linkHardnestedResources()
+
         // Write pm3 preferences into $HOME/.proxmark3/preferences.json so pm3 saves
         // files to Documents/pm3/ instead of its default $HOME directory.
         // pm3 uses getenv("HOME") for this lookup — we pass HOME as the Documents directory,
@@ -441,6 +445,24 @@ enum PM3HomeSetup {
                                                    options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: prefFile)
         }
+    }
+
+    /// searchFile looks for `$HOME/.proxmark3/resources/hardnested_tables/`. HOME is
+    /// Documents, so a symlink here is visible to the in-process client without
+    /// putting a folder named `resources` in the .app (which breaks codesign).
+    private static func linkHardnestedResources() {
+        let fm = FileManager.default
+        guard let src = Bundle.main.url(forResource: "pm3-resources", withExtension: nil) else {
+            return
+        }
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dest = docs.appendingPathComponent(".proxmark3/resources")
+        try? fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let existing = try? fm.destinationOfSymbolicLink(atPath: dest.path), existing == src.path {
+            return
+        }
+        try? fm.removeItem(at: dest)
+        try? fm.createSymbolicLink(at: dest, withDestinationURL: src)
     }
 
     static var documentsPath: String {

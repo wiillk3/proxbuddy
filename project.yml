@@ -35,6 +35,7 @@ targets:
           - "Resources/cmdscripts"
           - "Resources/lualibs"
           - "Resources/dictionaries"
+          - "Resources/pm3-resources"
           - "Python.xcframework"
           - "Resources/python311.zip"
           - "Resources/python313.zip"
@@ -49,6 +50,10 @@ targets:
       - path: ProxBuddy/Resources/lualibs
         type: folder
       - path: ProxBuddy/Resources/dictionaries
+        type: folder
+      # Not named `resources`: that name is reserved in an iOS bundle and
+      # codesign fails. Linked to $HOME/.proxmark3/resources/ at launch.
+      - path: ProxBuddy/Resources/pm3-resources
         type: folder
 
     # BeeWare's XCFramework is only the libPython dylib. Stdlib + lib-dynload

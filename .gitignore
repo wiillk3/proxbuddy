@@ -70,6 +70,7 @@ ProxBuddy/Resources/lualibs/
 ProxBuddy/Resources/dictionaries/
 ProxBuddy/Resources/pyscripts/
 ProxBuddy/Resources/cmdscripts/
+ProxBuddy/Resources/pm3-resources/
 ProxBuddy/Resources/pm3client
 ProxBuddy/Resources/tools/*
 !ProxBuddy/Resources/tools/.gitkeep

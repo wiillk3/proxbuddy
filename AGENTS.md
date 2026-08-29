@@ -21,6 +21,7 @@ the next build overwrites it. Before changing a file, check it against this tabl
 | `ProxBuddy/Resources/cmdscripts/` | Copied from the Iceman clone | Same |
 | `ProxBuddy/Resources/lualibs/` | Copied from the Iceman clone | Same |
 | `ProxBuddy/Resources/dictionaries/` | Copied from the Iceman clone | Same |
+| `ProxBuddy/Resources/pm3-resources/` | Copied from the Iceman clone (`client/resources/`, incl. hardnested tables). Cannot be bundled as `resources/` — iOS codesign reserves that name. | Same |
 | `ProxBuddy/Python.xcframework/` | Downloaded BeeWare release | Upstream BeeWare |
 | `ProxBuddy/Resources/python31*.zip` | `build_pm3_ios.sh` | That script |
 | `.app/python/lib/**`, `.app/Frameworks/*.framework` | `scripts/install_python_ios.sh` post-compile phase | That script |

@@ -37,7 +37,7 @@ You must pass the Iceman path. The script:
 
 - Cross-compiles `libpm3client.dylib` for iOS arm64
 - Downloads BeeWare’s Python 3.13 XCFramework (stdlib is copied into the app at Xcode build time)
-- Copies Iceman `lua` / `py` / `cmd` scripts and dictionaries into `ProxBuddy/Resources`
+- Copies Iceman `lua` / `py` / `cmd` scripts, dictionaries, and hardnested tables (`pm3-resources/`) into `ProxBuddy/Resources`
 - Cross-compiles the nested/DES helper tools into `ProxBuddy/Resources/tools` (those `.dylib`s are build outputs, not git)
 
 If the link step fails with `archive member '//' not a mach-o file` in `libcrypto.a`:
