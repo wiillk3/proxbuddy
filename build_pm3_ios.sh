@@ -43,9 +43,31 @@ for arg in "$@"; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PM3_SRC="${PM3_SRC_ARG:-/Users/williamkellner/d3v/proxmark/proxmark3}"
+PM3_SRC_ENV="${PM3_SRC:-}"
 OUTPUT="$SCRIPT_DIR/ProxBuddy/Resources/libpm3client.dylib"
 BUILD_DIR="/tmp/pm3-ios-build"
+
+if [ -n "$PM3_SRC_ARG" ]; then
+    PM3_SRC="$PM3_SRC_ARG"
+elif [ -n "$PM3_SRC_ENV" ]; then
+    PM3_SRC="$PM3_SRC_ENV"
+else
+    PM3_SRC=""
+    for candidate in "$SCRIPT_DIR/../proxmark3" "$HOME/proxmark3"; do
+        if [ -d "$candidate/client" ]; then
+            PM3_SRC="$candidate"
+            break
+        fi
+    done
+fi
+
+if [ -z "$PM3_SRC" ] || [ ! -d "$PM3_SRC/client" ]; then
+    echo "Usage: $0 [path/to/proxmark3] [--clean] [--update-pm3-git]"
+    echo "Pass the Iceman clone path, or set PM3_SRC."
+    echo "Looked in: ../proxmark3 and \$HOME/proxmark3"
+    exit 1
+fi
+PM3_SRC="$(cd "$PM3_SRC" && pwd)"
 
 # Ensure we always restore the upstream CMakeLists.txt even if the script fails
 cleanup() {

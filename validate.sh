@@ -21,7 +21,16 @@
 #   ./validate.sh --uid AABBCCDD    # override expected UID (different card)
 set -euo pipefail
 
-PM3_SRC="/Users/williamkellner/d3v/proxmark/proxmark3"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PM3_SRC="${PM3_SRC:-}"
+if [ -z "$PM3_SRC" ]; then
+    for candidate in "$SCRIPT_DIR/../proxmark3" "$HOME/proxmark3"; do
+        if [ -d "$candidate/client" ]; then
+            PM3_SRC="$candidate"
+            break
+        fi
+    done
+fi
 PASS=0
 FAIL=0
 EXPECTED_UID="C5 EC A5 9A"
@@ -75,11 +84,11 @@ echo "==> Port   : $PORT"
 
 # ── Find pm3 binary ───────────────────────────────────────────────────────────
 
-if [ -x "$PM3_SRC/client/proxmark3" ]; then
+if [ -n "$PM3_SRC" ] && [ -x "$PM3_SRC/client/proxmark3" ]; then
     PM3_BIN="$PM3_SRC/client/proxmark3"
 elif command -v proxmark3 &>/dev/null; then
     PM3_BIN="$(command -v proxmark3)"
-elif [ -x "$PM3_SRC/pm3" ]; then
+elif [ -n "$PM3_SRC" ] && [ -x "$PM3_SRC/pm3" ]; then
     # pm3 is a shell wrapper — extract the actual binary call
     # Use it directly since it handles port detection too
     PM3_BIN="$PM3_SRC/pm3"

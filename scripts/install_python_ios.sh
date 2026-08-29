@@ -1,9 +1,8 @@
 #!/bin/bash
 # Xcode Run Script: stage BeeWare stdlib into the .app and rewrite .so → frameworks.
 #
-# Do not call BeeWare's install_python() — it shells out to rsync with paths that
-# are already absolute. Xcode 16+/26 wraps rsync and prefixes SRCROOT again:
-#   .../proxbuddy/Users/.../proxbuddy/ProxBuddy/Python.xcframework/ios-arm64/lib/
+# Do not call BeeWare's install_python() — it shells out to rsync with already-
+# absolute paths, and Xcode 16+/26 wraps rsync and prefixes SRCROOT again.
 # ditto is not wrapped and copies the same trees.
 set -euo pipefail
 

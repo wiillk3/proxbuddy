@@ -4,21 +4,24 @@ import Foundation
 // In the simulator the process runs on the Mac and has direct access to
 // /dev/tty.usbmodem* and the host filesystem. We skip the transport layer
 // entirely and hand the macOS pm3 binary the real USB serial port.
-//
-// This lets you test the full pm3 client + TerminalEngine pipeline against
-// real hardware without BLE or TCP.
 enum SimulatorBoot {
-    // Locations to check for the macOS pm3 binary, in priority order.
-    private static let pm3Candidates = [
-        // RRG repo build output (most likely for active development)
-        "/Users/williamkellner/d3v/proxmark/proxmark3/client/proxmark3",
-        // Homebrew
-        "/opt/homebrew/bin/proxmark3",
-        "/usr/local/bin/proxmark3",
-    ]
-
     static func pm3BinaryPath() -> String? {
-        pm3Candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        var seen = Set<String>()
+        var candidates: [String] = [
+            NSHomeDirectory() + "/proxmark3/client/proxmark3",
+            "/opt/homebrew/bin/proxmark3",
+            "/usr/local/bin/proxmark3",
+        ]
+        if let path = ProcessInfo.processInfo.environment["PATH"] {
+            candidates += path.split(separator: ":").map { "\($0)/proxmark3" }
+        }
+        if let resolved = which("proxmark3") {
+            candidates.append(resolved)
+        }
+        return candidates.first { path in
+            seen.insert(path).inserted
+                && FileManager.default.isExecutableFile(atPath: path)
+        }
     }
 
     static func usbSerialPort() -> String? {
@@ -32,11 +35,32 @@ enum SimulatorBoot {
             .first
     }
 
-    // Returns a human-readable description of what was found (or not).
     static func statusDescription() -> String {
         let bin = pm3BinaryPath() ?? "pm3 binary not found"
         let port = usbSerialPort() ?? "no USB serial port found"
         return "sim: \(bin.split(separator: "/").last ?? "?") · \(port)"
+    }
+
+    /// Xcode's Simulator PATH often omits Homebrew; a login shell still sees it.
+    private static func which(_ name: String) -> String? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        proc.arguments = ["-lc", "command -v \(name)"]
+        let out = Pipe()
+        proc.standardOutput = out
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+        } catch {
+            return nil
+        }
+        guard proc.terminationStatus == 0,
+              let data = try? out.fileHandleForReading.readToEnd(),
+              let s = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !s.isEmpty else { return nil }
+        return s
     }
 }
 #endif
