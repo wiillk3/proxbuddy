@@ -9,7 +9,7 @@ enum SimulatorBoot {
     /// `~` is the Mac home (`/Users/you`), not the Simulator container.
     /// Example: `"~/d3v/proxmark/proxmark3/client/proxmark3"`
     /// Leave empty to search ~/proxmark3, Homebrew, /usr/local/bin, then PATH.
-    static let clientPath: String = "~/d3v/proxmark/proxmark3/client/proxmark3"
+    static let clientPath: String = ""
 
     static func pm3BinaryPath() -> String? {
         let override = clientPath.trimmingCharacters(in: .whitespacesAndNewlines)
