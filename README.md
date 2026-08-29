@@ -71,4 +71,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Short version: branch off `main`, open a
 
 ## License
 
+Copyright (C) 2026 ProxBuddy Project & Contributors.
+
 ProxBuddy is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE) and [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md).
