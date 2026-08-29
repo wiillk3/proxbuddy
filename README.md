@@ -29,8 +29,8 @@ Getting Started has been tested on one machine besides the author’s. Please re
 ### 1. Compile the iOS client and bundle scripts
 
 ```bash
-git clone https://github.com/RfidResearchGroup/proxmark3.git ~/proxmark3
-./build_pm3_ios.sh ~/proxmark3
+git clone https://github.com/RfidResearchGroup/proxmark3.git ~/proxmark3 # if needed
+./build_pm3_ios.sh ~/proxmark3 # you can point it to the location of an already existing repo
 ```
 
 You must pass the Iceman path. The script:
