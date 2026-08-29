@@ -11,7 +11,7 @@ We extend our deepest gratitude to the open-source projects, maintainers, and ha
 * **Project**: Proxmark3 / RRG Iceman Firmware & Client
 * **Upstream Repository**: [https://github.com/RfidResearchGroup/proxmark3](https://github.com/RfidResearchGroup/proxmark3)
 * **Original Creator**: Jonathan Westhues
-* **Maintainers & Key Contributors**: Iceman (@iceman1001), DXL (@xianglin1998), Christian Herrmann, and the RFID Research Group community.
+* **Maintainers & Key Contributors**: @iceman1001, @xianglin1998, and many others. The Iceman/RRG repo is the work of a long line of people — this list is nowhere near complete.
 * **License**: **GNU General Public License v2.0 or later (GPL-2.0-or-later)**
 * **Usage in ProxBuddy**: `libpm3client.dylib` is cross-compiled for iOS arm64 / x86_64 simulator and bundled directly into ProxBuddy to provide full native client execution and RFID command processing.
 
@@ -21,9 +21,9 @@ We extend our deepest gratitude to the open-source projects, maintainers, and ha
 
 * **Project**: Proxmark5 BLE/Wi-Fi Module (BWM) ESP32-C2 Firmware
 * **Upstream Repository**: [https://github.com/RfidResearchGroup/Proxmark5_BWM_esp32](https://github.com/RfidResearchGroup/Proxmark5_BWM_esp32)
-* **Author & Lead Engineer**: DXL (@xianglin1998) & RFID Research Group
+* **Thanks**: @nieldk and @doegox for getting BLE and Wi-Fi up on the Proxmark5, and to everyone else in that repo whose work over the years got the PM5 here. Named names are a handful of people, not the whole story.
 * **License**: **GPL-3.0 / Apache-2.0 (ESP-IDF)**
-* **Usage in ProxBuddy**: Wireless Bluetooth LE SPP (`0xAE86` / `0xAE88`), Battery Service (`0x180F`), and Wi-Fi Direct protocols in ProxBuddy are implemented according to the PM5 BWM specification.
+* **Usage in ProxBuddy**: Wireless Bluetooth LE SPP (`0xAE86` / `0xAE88`), Battery Service (`0x180F`), and BWM Wi-Fi station + TCP server (`hw bwmwifi`, default port 7777).
 
 ---
 
@@ -52,7 +52,6 @@ We extend our deepest gratitude to the open-source projects, maintainers, and ha
 * **Project**: ProxBuddy
 * **Repository**: [https://github.com/spot-rfid/proxbuddy](https://github.com/spot-rfid/proxbuddy)
 * **License**: **GNU General Public License v3.0 (GPL-3.0)**
-* **Copyright**: Copyright (C) 2026 ProxBuddy Project.
 
 ---
 
