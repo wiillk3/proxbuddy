@@ -65,6 +65,10 @@ Open `ProxBuddy.xcodeproj` in Xcode and set your Team under Signing & Capabiliti
 - **Physical iPhone** — the app `dlopen`s `libpm3client.dylib` on a background thread. BLE relays the client UART to the PM5 SPP characteristic. Wi-Fi opens `tcp:host:port` the same way desktop `pm3 -p tcp:…` does (bring the BWM up first with `hw bwmwifi` over BLE or USB). Pick **PM5 BLE** or **Wi-Fi** on the Devices tab, then connect.
 - **iOS Simulator** — plug a USB Proxmark into the Mac (RDV4 and PM5 tested; PM3 Easy should work). If the host `proxmark3` is not at `~/proxmark3`, Homebrew, or `/usr/local/bin`, set `SimulatorBoot.clientPath` in `ProxBuddy/Runner/SimulatorBoot.swift`.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Short version: branch off `main`, open a PR.
+
 ## License
 
 ProxBuddy is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE) and [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md).
