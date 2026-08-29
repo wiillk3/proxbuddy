@@ -66,7 +66,7 @@ targets:
       properties:
         UILaunchScreen:
           UIColorName: White
-        NSLocalNetworkUsageDescription: "ProxBuddy uses the local network to connect to your Proxmark5 over Wi-Fi Direct."
+        NSLocalNetworkUsageDescription: "ProxBuddy uses the local network to connect to your Proxmark5 over Wi-Fi (STA + TCP)."
         NSBluetoothAlwaysUsageDescription: "ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device."
         NSBluetoothPeripheralUsageDescription: "ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device."
         NSLocationWhenInUseUsageDescription: "ProxBuddy uses your location to optionally tag RFID/NFC card dumps with GPS coordinates for spatial analysis."

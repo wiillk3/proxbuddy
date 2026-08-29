@@ -52,7 +52,7 @@ final class BLETransport: NSObject, ObservableObject {
 
     // MARK: - Port Attachment (Relay between pm3 & BLE)
 
-    /// Called by PM3Session / BinaryRunner after launching the C engine loopback socket.
+    /// Called by PM3Session after the local tcp: accept completes.
     func attach(portFD: Int32) {
         self.portFD = portFD
         startRelayLoop(fd: portFD)

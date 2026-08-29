@@ -1,0 +1,16 @@
+--- a/client/src/pm3.c
++++ b/client/src/pm3.c
+@@ -37,8 +37,11 @@ pm3_device_t *pm3_open(const char *port) {
+         CloseProxmark(g_session.current_device);
+     }
+ 
+-    if ((port != NULL) && (!g_session.pm3_present))
+-        exit(EXIT_FAILURE);
++    // iOS: this runs in-process. exit() kills the whole app. Return NULL so
++    // the Swift runner can surface the failure instead.
++    if ((port != NULL) && (!g_session.pm3_present)) {
++        return NULL;
++    }
+ 
+     if (!g_session.pm3_present) {
+         PrintAndLogEx(INFO, _RED_("OFFLINE") " mode");

@@ -76,6 +76,10 @@ struct DeviceInfoSheet: View {
                     infoRow("Negotiated MTU", "\(session.bleTransport.negotiatedMTU) bytes")
                     infoRow("SPP", "0xAE86 / 0xAE88")
                 }
+                if case .wifi = session.selectedTransportMode {
+                    let host = session.wifiHost.trimmingCharacters(in: .whitespacesAndNewlines)
+                    infoRow("TCP", host.isEmpty ? "—" : "tcp:\(host):\(session.wifiPort)")
+                }
                 #endif
             }
         }

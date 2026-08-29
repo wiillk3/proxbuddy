@@ -23,7 +23,7 @@
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>ProxBuddy uses the local network to connect to your Proxmark5 over Wi-Fi Direct.</string>
+	<string>ProxBuddy uses the local network to connect to your Proxmark5 over Wi-Fi (STA + TCP).</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>ProxBuddy uses your location to optionally tag RFID/NFC card dumps with GPS coordinates for spatial analysis.</string>
 	<key>UIBackgroundModes</key>

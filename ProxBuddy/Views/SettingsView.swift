@@ -204,7 +204,7 @@ struct AcknowledgementsView: View {
                     title: "Proxmark5 BWM ESP32 Firmware",
                     authors: "DXL (@xianglin1998) & RFID Research Group",
                     license: "GPL-3.0 / Apache-2.0 (ESP-IDF)",
-                    description: "Wireless Bluetooth LE SPP (0xAE86/0xAE88), Battery Service (0x180F), and Wi-Fi Direct module specs.",
+                    description: "Wireless Bluetooth LE SPP (0xAE86/0xAE88), Battery Service (0x180F), and BWM Wi-Fi station + TCP server.",
                     url: "https://github.com/RfidResearchGroup/Proxmark5_BWM_esp32"
                 )
 

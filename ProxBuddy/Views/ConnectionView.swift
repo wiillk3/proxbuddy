@@ -151,12 +151,18 @@ private struct SessionCardView: View {
                     Picker("Transport", selection: Binding(
                         get: { session.selectedTransportMode },
                         set: { newMode in
+                            if session.selectedTransportMode == newMode { return }
+                            #if !targetEnvironment(simulator)
+                            if case .ble = session.selectedTransportMode,
+                               session.bleTransport.connectionState == .scanning {
+                                session.bleTransport.stopScanning()
+                            }
+                            #endif
                             session.selectedTransportMode = newMode
-                            Task { await session.restart(scanHistory: scanHistory) }
                         }
                     )) {
                         Text("PM5 BLE").tag(TransportMode.ble)
-                        Text("Wi-Fi Direct").tag(TransportMode.wifiDirect(host: "192.168.1.50", port: 9099))
+                        Text("Wi-Fi").tag(TransportMode.wifi)
                     }
                     .pickerStyle(.segmented)
                 }
@@ -164,6 +170,10 @@ private struct SessionCardView: View {
                 // BLE Connection / Scanner Details
                 if case .ble = session.selectedTransportMode {
                     BLEScannerSection(session: session, scanHistory: scanHistory)
+                }
+
+                if case .wifi = session.selectedTransportMode {
+                    WiFiSection(session: session, scanHistory: scanHistory)
                 }
 
                 Divider().background(Color.glassBorder)
@@ -398,6 +408,136 @@ private struct BLEScannerSection: View {
             .background(color.opacity(0.15))
             .foregroundStyle(color)
             .clipShape(Capsule())
+    }
+}
+
+// MARK: - Wi-Fi (STA + TCP)
+
+private struct WiFiSection: View {
+    @ObservedObject var session: PM3Session
+    var scanHistory: ScanHistoryStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("WI-FI (STA + TCP)")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(onTCP ? "CONNECTED" : (session.wifiConnecting ? "CONNECTING" : "OFFLINE"))
+                    .font(.system(.caption2, design: .monospaced))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background((onTCP ? Color.hackerGreen : (session.wifiConnecting ? Color.yellow : Color.secondary)).opacity(0.15))
+                    .foregroundStyle(onTCP ? .hackerGreen : (session.wifiConnecting ? .yellow : .secondary))
+                    .clipShape(Capsule())
+            }
+
+            Text("Once the BWM is on Wi-Fi (hw bwmwifi over BLE or USB, once), skip BLE — Connect with the IP it printed. Default port 7777. No mDNS.")
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                TextField("192.168.1.77", text: $session.wifiHost)
+                    .textFieldStyle(.plain)
+                    .font(.system(.footnote, design: .monospaced))
+                    .keyboardType(.asciiCapable)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.go)
+                    .padding(8)
+                    .background(Color.black.opacity(0.3).cornerRadius(8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.glassBorder, lineWidth: 1))
+                    .onSubmit {
+                        Task { await session.connectWiFi(scanHistory: scanHistory) }
+                    }
+                TextField("7777", text: portBinding)
+                    .textFieldStyle(.plain)
+                    .font(.system(.footnote, design: .monospaced))
+                    .keyboardType(.numberPad)
+                    .frame(width: 64)
+                    .padding(8)
+                    .background(Color.black.opacity(0.3).cornerRadius(8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.glassBorder, lineWidth: 1))
+            }
+
+            if onTCP {
+                Button("Disconnect") {
+                    session.terminate()
+                }
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.red)
+            } else {
+                Button {
+                    Task { await session.connectWiFi(scanHistory: scanHistory) }
+                } label: {
+                    if session.wifiConnecting {
+                        Label("Connecting…", systemImage: "hourglass")
+                    } else if session.runner.isRunning {
+                        Label("Switch to Wi-Fi", systemImage: "wifi")
+                    } else {
+                        Label("Connect", systemImage: "wifi")
+                    }
+                }
+                .font(.system(.caption, design: .monospaced))
+                .buttonStyle(.borderedProminent)
+                .tint(.hackerGreen)
+                .disabled(session.wifiHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || session.wifiConnecting)
+            }
+
+            Divider().background(Color.glassBorder)
+
+            Text("BRING UP FROM BLE")
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            if session.runner.isRunning {
+                TextField("SSID", text: $session.wifiSSID)
+                    .textFieldStyle(.plain)
+                    .font(.system(.footnote, design: .monospaced))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .padding(8)
+                    .background(Color.black.opacity(0.3).cornerRadius(8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.glassBorder, lineWidth: 1))
+                SecureField("Password (omit if open)", text: $session.wifiPassword)
+                    .textFieldStyle(.plain)
+                    .font(.system(.footnote, design: .monospaced))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .padding(8)
+                    .background(Color.black.opacity(0.3).cornerRadius(8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.glassBorder, lineWidth: 1))
+                Button {
+                    Task { await session.bringUpWiFi() }
+                } label: {
+                    Label("Join network (hw bwmwifi)", systemImage: "antenna.radiowaves.left.and.right")
+                }
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.hackerGreen)
+                .disabled(session.wifiSSID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || session.wifiConnecting)
+            } else {
+                Text("Connect over BLE first, then join a network here — or type an IP from another client.")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var onTCP: Bool {
+        session.runner.isRunning && session.runner.portMasterFD < 0
+    }
+
+    private var portBinding: Binding<String> {
+        Binding(
+            get: { String(session.wifiPort) },
+            set: { newValue in
+                let digits = newValue.filter(\.isNumber)
+                if digits.isEmpty { return }
+                if let v = UInt16(digits), v > 0 {
+                    session.wifiPort = v
+                }
+            }
+        )
     }
 }
 #endif

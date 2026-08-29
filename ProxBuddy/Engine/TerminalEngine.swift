@@ -177,6 +177,12 @@ final class TerminalEngine: ObservableObject {
         return await captureRaw(cmd, silent: false)
     }
 
+    /// Sends a command, shows it in the terminal, and returns stripped output lines.
+    func captureOutput(_ command: String) async -> [String] {
+        append(TerminalLine(raw: "pm3 --> \(command)", timestamp: Date(), isInput: true))
+        return await captureRaw(command, silent: false)
+    }
+
     /// Sends a command silently (no terminal display) and returns stripped output lines.
     /// Used by the command browser to navigate without cluttering the terminal.
     func captureOutputSilent(_ command: String) async -> [String] {

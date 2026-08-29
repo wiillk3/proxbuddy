@@ -45,7 +45,6 @@ struct ContentView: View {
         mainTabs
             .environmentObject(session.engine)
             .environmentObject(session.runner)
-            .environmentObject(session.transport)
             .environmentObject(session.bleTransport)
         #endif
     }
@@ -117,7 +116,6 @@ struct ContentView: View {
         TerminalView()
             .environmentObject(session.engine)
             .environmentObject(session.runner)
-            .environmentObject(session.transport)
             .environmentObject(session.bleTransport)
             .environmentObject(appNav)
         #endif

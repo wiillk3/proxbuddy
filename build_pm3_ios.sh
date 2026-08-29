@@ -72,7 +72,7 @@ PM3_SRC="$(cd "$PM3_SRC" && pwd)"
 # Ensure we always restore the upstream CMakeLists.txt even if the script fails
 cleanup() {
     if [ -d "$PM3_SRC/.git" ]; then
-        git -C "$PM3_SRC" checkout -- client/CMakeLists.txt 2>/dev/null || true
+        git -C "$PM3_SRC" checkout -- client/CMakeLists.txt client/src/pm3.c 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
@@ -305,6 +305,10 @@ sed -e "s|@PYTHON_INC_DIR@|${PYTHON_INC_DIR}|g" \
 # Apply the patch — will fail loudly if upstream CMakeLists has changed
 git -C "$PM3_SRC" apply "$PATCH_TMP"
 echo "==> Patch applied successfully."
+
+echo "==> Applying iOS pm3_open no-exit patch..."
+git -C "$PM3_SRC" apply "$SCRIPT_DIR/patches/ios-pm3-open-no-exit.patch"
+echo "==> pm3_open patch applied."
 
 # ── CMake configure ───────────────────────────────────────────────────────────
 # No -DCMAKE_TOOLCHAIN_FILE — that's intentional. See header comment.

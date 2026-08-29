@@ -6,7 +6,6 @@ struct TerminalView: View {
     @EnvironmentObject var deviceManager: DeviceManager
     @EnvironmentObject var runner:        BinaryRunner
     #if !targetEnvironment(simulator)
-    @EnvironmentObject var tcp: TcpTransport
     @EnvironmentObject var ble: BLETransport
     #endif
 
@@ -140,8 +139,8 @@ struct TerminalView: View {
             switch session.selectedTransportMode {
             case .ble:
                 return (ble.connectionState == .ready && runner.isRunning) ? .green : .yellow
-            case .wifiDirect:
-                return (tcp.isReady && runner.isRunning) ? .green : .yellow
+            case .wifi:
+                return runner.isRunning ? .green : .yellow
             }
         }
         return .yellow
@@ -155,7 +154,7 @@ struct TerminalView: View {
         if let session = deviceManager.activeSession {
             return session.statusMessage
         }
-        return tcp.statusMessage
+        return "Disconnected"
         #endif
     }
 }

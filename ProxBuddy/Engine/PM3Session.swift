@@ -3,22 +3,56 @@ import Combine
 
 enum TransportMode: Hashable, Identifiable {
     case ble
-    case wifiDirect(host: String, port: UInt16)
+    case wifi
 
     var id: String {
         switch self {
         case .ble: return "ble"
-        case .wifiDirect(let h, let p): return "wifi-\(h):\(p)"
+        case .wifi: return "wifi"
         }
+    }
+}
+
+enum BWMWiFiParse {
+    /// Pulls host/port from `hw bwmwifi` output (`BWM on WiFi at …` / `pm3 -p tcp:…`).
+    static func endpoint(from lines: [String]) -> (host: String, port: UInt16)? {
+        let text = lines.joined(separator: "\n")
+        if let match = text.firstMatch(of: /tcp:([0-9A-Za-z._-]+):(\d+)/) {
+            let host = String(match.1)
+            if let port = UInt16(match.2), port > 0 {
+                return (host, port)
+            }
+        }
+        if let match = text.firstMatch(of: /BWM on WiFi at ([0-9A-Za-z._-]+)/) {
+            return (String(match.1), 7777)
+        }
+        return nil
     }
 }
 
 /// One connected Proxmark — bundles runner, engine, and active transport together.
 @MainActor
 final class PM3Session: ObservableObject, Identifiable {
+    private static let wifiHostKey = "com.proxbuddy.wifi.host"
+    private static let wifiPortKey = "com.proxbuddy.wifi.port"
+    private static let wifiSSIDKey = "com.proxbuddy.wifi.ssid"
+
     let id = UUID()
     @Published var label: String
     @Published var selectedTransportMode: TransportMode = .ble {
+        didSet { refreshDerivedStatus() }
+    }
+    @Published var wifiHost: String {
+        didSet { UserDefaults.standard.set(wifiHost, forKey: Self.wifiHostKey) }
+    }
+    @Published var wifiPort: UInt16 {
+        didSet { UserDefaults.standard.set(Int(wifiPort), forKey: Self.wifiPortKey) }
+    }
+    @Published var wifiSSID: String {
+        didSet { UserDefaults.standard.set(wifiSSID, forKey: Self.wifiSSIDKey) }
+    }
+    @Published var wifiPassword = ""
+    @Published var wifiConnecting = false {
         didSet { refreshDerivedStatus() }
     }
     @Published private(set) var isRunning = false
@@ -32,14 +66,16 @@ final class PM3Session: ObservableObject, Identifiable {
 
     #if !targetEnvironment(simulator)
     let bleTransport = BLETransport()
-    let tcpTransport = TcpTransport()
-    var transport: TcpTransport { tcpTransport }
     #endif
 
     private var cancellables = Set<AnyCancellable>()
 
     init(label: String) {
         self.label = label
+        self.wifiHost = UserDefaults.standard.string(forKey: Self.wifiHostKey) ?? ""
+        let storedPort = UserDefaults.standard.integer(forKey: Self.wifiPortKey)
+        self.wifiPort = (1...65535).contains(storedPort) ? UInt16(storedPort) : 7777
+        self.wifiSSID = UserDefaults.standard.string(forKey: Self.wifiSSIDKey) ?? ""
         runner.$isRunning
             .sink { [weak self] _ in self?.refreshDerivedStatus() }
             .store(in: &cancellables)
@@ -51,12 +87,6 @@ final class PM3Session: ObservableObject, Identifiable {
             .sink { [weak self] _ in self?.refreshDerivedStatus() }
             .store(in: &cancellables)
         bleTransport.$batteryLevel
-            .sink { [weak self] _ in self?.refreshDerivedStatus() }
-            .store(in: &cancellables)
-        tcpTransport.$isReady
-            .sink { [weak self] _ in self?.refreshDerivedStatus() }
-            .store(in: &cancellables)
-        tcpTransport.$statusMessage
             .sink { [weak self] _ in self?.refreshDerivedStatus() }
             .store(in: &cancellables)
         #endif
@@ -85,6 +115,8 @@ final class PM3Session: ObservableObject, Identifiable {
         let nextStatus: String
         let nextReady: Bool
         let nextBattery: Int?
+        let bleBatt = bleTransport.batteryLevel.flatMap { (0...100).contains($0) ? $0 : nil }
+        nextBattery = bleBatt ?? gaugeSoC
         switch selectedTransportMode {
         case .ble:
             if let name = bleTransport.connectedPeripheralName {
@@ -93,12 +125,19 @@ final class PM3Session: ObservableObject, Identifiable {
                 nextStatus = "BLE: \(bleTransport.connectionState.rawValue)"
             }
             nextReady = bleTransport.connectionState == .ready
-            let bleBatt = bleTransport.batteryLevel.flatMap { (0...100).contains($0) ? $0 : nil }
-            nextBattery = bleBatt ?? gaugeSoC
-        case .wifiDirect:
-            nextStatus = tcpTransport.statusMessage
-            nextReady = true
-            nextBattery = bleTransport.batteryLevel.flatMap { (0...100).contains($0) ? $0 : nil } ?? gaugeSoC
+        case .wifi:
+            let host = wifiHost.trimmingCharacters(in: .whitespacesAndNewlines)
+            let endpoint = host.isEmpty ? "tcp:?:\(wifiPort)" : "tcp:\(host):\(wifiPort)"
+            if wifiConnecting {
+                nextStatus = "Wi-Fi: connecting \(endpoint)"
+                nextReady = false
+            } else if running {
+                nextStatus = "Wi-Fi: \(endpoint)"
+                nextReady = true
+            } else {
+                nextStatus = "Wi-Fi: disconnected"
+                nextReady = false
+            }
         }
         if statusMessage != nextStatus { statusMessage = nextStatus }
         if isTransportReady != nextReady { isTransportReady = nextReady }
@@ -137,19 +176,25 @@ final class PM3Session: ObservableObject, Identifiable {
             ?? Bundle.main.url(forResource: "libpm3client", withExtension: "dylib")
         engine.append(raw: "[=] boot: \(bundledURL?.path ?? "none")", isInput: false)
         do {
-            try await runner.launch()
-        } catch {
-            engine.append(raw: "[!] boot: launch failed — \(error.localizedDescription)", isInput: false)
-            return
-        }
-        if runner.portMasterFD >= 0 {
             switch selectedTransportMode {
             case .ble:
-                bleTransport.attach(portFD: runner.portMasterFD)
-            case .wifiDirect(let host, let port):
-                tcpTransport.connect(host: host, port: port)
-                tcpTransport.attach(portFD: runner.portMasterFD)
+                try await runner.launch { [weak self] fd in
+                    self?.bleTransport.attach(portFD: fd)
+                }
+            case .wifi:
+                let host = wifiHost.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !host.isEmpty else {
+                    engine.append(raw: "[!] Wi-Fi: enter the BWM IP or hostname", isInput: false)
+                    return
+                }
+                let spec = "tcp:\(host):\(wifiPort)"
+                engine.append(raw: "[=] opening \(spec)", isInput: false)
+                try await runner.launch(tcpHost: host, tcpPort: wifiPort)
             }
+        } catch {
+            engine.append(raw: "[!] boot: launch failed — \(error.localizedDescription)", isInput: false)
+            runner.terminate()
+            return
         }
         Task { await engine.connect(to: runner) }
         #endif
@@ -159,6 +204,10 @@ final class PM3Session: ObservableObject, Identifiable {
     /// complete (.ready), then boot pm3 client so the relay is wired up correctly.
     #if !targetEnvironment(simulator)
     func connectBLEAndBoot(to discovered: DiscoveredPeripheral, scanHistory: ScanHistoryStore) async {
+        if runner.isRunning {
+            runner.terminate()
+        }
+        selectedTransportMode = .ble
         bleTransport.connect(to: discovered)
         // Wait until BLE reaches .ready or .error / .disconnected
         for await state in bleTransport.connectionEvents {
@@ -171,6 +220,59 @@ final class PM3Session: ObservableObject, Identifiable {
         }
         // PM3 client boots now, with BLE already attached
         await boot(scanHistory: scanHistory)
+    }
+
+    /// libpm3 opens `tcp:host:port` itself — same as desktop `pm3 -p tcp:…`.
+    func connectWiFi(scanHistory: ScanHistoryStore) async {
+        let host = wifiHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else {
+            engine.append(raw: "[!] Wi-Fi: enter the BWM IP or hostname", isInput: false)
+            return
+        }
+        selectedTransportMode = .wifi
+        wifiConnecting = true
+        defer { wifiConnecting = false }
+        await restart(scanHistory: scanHistory)
+    }
+
+    /// Join the BWM to STA Wi-Fi over the current (BLE) client and fill host/port.
+    func bringUpWiFi() async {
+        guard runner.isRunning else {
+            engine.append(raw: "[!] Wi-Fi: connect over BLE first, then join a network", isInput: false)
+            return
+        }
+        let ssid = wifiSSID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ssid.isEmpty else {
+            engine.append(raw: "[!] Wi-Fi: SSID is required", isInput: false)
+            return
+        }
+        var parts = ["hw bwmwifi", "--ssid", Self.cliToken(ssid)]
+        let pwd = wifiPassword
+        if !pwd.isEmpty {
+            parts += ["--pwd", Self.cliToken(pwd)]
+        }
+        parts += ["--port", "\(wifiPort)"]
+        let cmd = parts.joined(separator: " ")
+        wifiConnecting = true
+        defer { wifiConnecting = false }
+        engine.append(raw: "[=] \(cmd) — join can take ~15s", isInput: false)
+        let lines = await engine.captureOutput(cmd)
+        if let parsed = BWMWiFiParse.endpoint(from: lines) {
+            wifiHost = parsed.host
+            wifiPort = parsed.port
+            engine.append(raw: "[+] BWM on WiFi at \(parsed.host):\(parsed.port)", isInput: false)
+        } else {
+            engine.append(raw: "[!] Wi-Fi: bring-up did not report an IP — check SSID/password", isInput: false)
+        }
+    }
+
+    private static func cliToken(_ value: String) -> String {
+        let needsQuotes = value.contains(where: { $0.isWhitespace || "\"'\\".contains($0) })
+        guard needsQuotes else { return value }
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
     }
     #endif
 
@@ -185,6 +287,7 @@ final class PM3Session: ObservableObject, Identifiable {
             }
             return
         }
+        bleTransport.disconnect()
         #endif
         await boot(scanHistory: scanHistory)
     }
@@ -193,7 +296,6 @@ final class PM3Session: ObservableObject, Identifiable {
         runner.terminate()
         #if !targetEnvironment(simulator)
         bleTransport.disconnect()
-        tcpTransport.disconnect()
         #endif
     }
 }
