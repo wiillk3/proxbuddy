@@ -1,78 +1,70 @@
 # ProxBuddy
 
-ProxBuddy is a native iOS companion app and full terminal client for the Proxmark3 (PM3). 
-
-Built with SwiftUI, ProxBuddy embeds the actual `proxmark3` C client directly into the iOS app via a custom dynamic library (`libpm3client.dylib`). It provides a fully-featured PM3 terminal, an intuitive command builder, and a visual dump manager for organizing and manipulating card captures directly from your phone.
+ProxBuddy is a native iOS terminal and companion for **Proxmark5**. It embeds the RRG/Iceman `proxmark3` client (`libpm3client.dylib`) in-process and talks to the PM5 BWM over **Bluetooth LE** or **Wi-Fi Direct**.
 
 ## Key Features
 
-- **Full Native Terminal**: Interact with the `proxmark3` client exactly as you would on a desktop. Features command history, ANSI color support, and auto-scrolling.
-- **Visual Command Builder**: Forget the exact arguments for a command? Use the interactive builder to browse commands, options, and parameters visually, then push the generated command straight to the terminal.
-- **Dump Manager**: Automatically captures and organizes `.bin`, `.json`, and `.eml` dumps. View sector keys, manipulate blocks, and seamlessly load dumps back into emulator memory or write them to physical cards.
-- **Hardware Integration**: Connect physical PM3 hardware directly via USB (using the Simulator path or natively when supported) and execute real hardware commands (`hf mf sim`, `hf mf autopwn`, etc.).
-- **Offline / Script Mode**: The app automatically boots in an offline/script environment if no hardware is detected, allowing you to parse dumps and run scripts locally on the iOS device.
+- **Native terminal** — full pm3 client on device: history, ANSI color, auto-scroll.
+- **Command builder** — browse commands and options, then send the generated line to the terminal.
+- **Dump manager** — picks up `.bin` / `.json` / `.eml` dumps, shows sector keys and blocks, and can load or write them back through the client.
+- **PM5 radio** — BLE SPP to the BWM, or TCP over Wi-Fi Direct. Scan and connect from the Devices tab.
+- **Scripts** — Lua and Python from the Iceman tree run on device (Python 3.13 via BeeWare).
+- **Optional GPS tags** — off by default; can attach location sidecars to dumps.
+
+On a **physical iPhone**, connect a PM5 over BLE or Wi-Fi Direct. In the **iOS Simulator**, plug a USB Proxmark into the Mac instead (see Build and run).
 
 ## Prerequisites
 
-- **Xcode 26+** and macOS
+- macOS with **Xcode 26+**
 - **Homebrew**
-- **XcodeGen** (for generating the Xcode project file)
-- **Proxmark3 RRG/Iceman source code** (required for compiling the iOS library)
+- **XcodeGen**
+- A clone of **[RRG/Iceman proxmark3](https://github.com/RfidResearchGroup/proxmark3)** (used only to compile the iOS client)
+- An iPhone and a Proxmark5 (device), or a USB Proxmark on the Mac (Simulator)
 
 Do not put GNU `ar` ahead of Apple’s on `PATH` (Homebrew `binutils` is the usual culprit). The iOS build must archive with Xcode’s `ar`.
 
+
 ## Getting Started
-(this has been tested on 1 other computer that isnt mine, please report any build errors you run into)
+Getting Started has been tested on one machine besides the author’s. Please report build errors.
+### 1. Compile the iOS client and bundle scripts
 
-### 1. Compile the Proxmark3 iOS Library & Python Dependencies
-ProxBuddy relies on a custom dynamic library (`libpm3client.dylib`) built from the official Proxmark3 source code, along with an embedded Python 3.13 framework.
-
-1. Clone the official Iceman Proxmark3 repository alongside ProxBuddy:
 ```bash
 git clone https://github.com/RfidResearchGroup/proxmark3.git ~/proxmark3
-```
-2. Run the build script, passing the path to the newly cloned repository:
-```bash
 ./build_pm3_ios.sh ~/proxmark3
 ```
-This script does the heavy lifting:
-- Configures CMake for an iOS/Aarch64 target.
-- Downloads BeeWare's `Python-Apple-support` framework for iOS.
-- Downloads BeeWare’s iOS Python 3.13 XCFramework (stdlib is copied into the app at Xcode build time).
-- Bundles the official Proxmark3 `lua`, `py`, and `cmd` scripts directly into the `ProxBuddy/Resources` folder.
-- Compiles the client into a single `.dylib`.
 
-If the link step fails with `archive member '//' not a mach-o file` in `libcrypto.a`, a GNU `ar` (often Homebrew `binutils`) built the OpenSSL cache. Unlink it and rebuild from scratch:
+You must pass the Iceman path. The script:
+
+- Cross-compiles `libpm3client.dylib` for iOS arm64
+- Downloads BeeWare’s Python 3.13 XCFramework (stdlib is copied into the app at Xcode build time)
+- Copies Iceman `lua` / `py` / `cmd` scripts and dictionaries into `ProxBuddy/Resources`
+- Cross-compiles the nested/DES helper tools into `ProxBuddy/Resources/tools` (those `.dylib`s are build outputs, not git)
+
+If the link step fails with `archive member '//' not a mach-o file` in `libcrypto.a`:
 
 ```bash
 brew unlink binutils   # if installed
 ./build_pm3_ios.sh --clean ~/proxmark3
 ```
 
-### 2. Generate the Xcode Project
-This project uses [XcodeGen](https://github.com/yonaskolb/XcodeGen) to manage the project file, which keeps the git history clean and prevents merge conflicts. 
+### 2. Generate the Xcode project
 
-If you don't have XcodeGen installed:
 ```bash
-brew install xcodegen
-```
-
-Run the following command in the root of the repository to generate `ProxBuddy.xcodeproj`:
-```bash
+brew install xcodegen   # if needed
 xcodegen
 ```
-*Note: You must run the build script in Step 1 **before** running `xcodegen`, so that XcodeGen can properly link the downloaded Python framework and script directories!*
 
-If Xcode’s **Install Python stdlib** phase fails with `rsync` / `(l)stat` / `ios-arm64/lib`, pull this repo, run `xcodegen` again, and rebuild. That phase must not use Xcode’s wrapped `rsync`.
+Run step 1 **before** `xcodegen`. The project file is generated and not committed.
 
-### 3. Build and Run
-Open the generated `ProxBuddy.xcodeproj` in Xcode.
+If Xcode’s **Install Python stdlib** phase fails with `rsync` / `(l)stat` / `ios-arm64/lib`, pull, run `xcodegen` again, and rebuild.
 
-- **Running on iOS Simulator**: The simulator path utilizes `posix_spawn` to run the native macOS `proxmark3` executable in the background and connects to it via a Pseudo-Terminal (PTY). If you have a PM3 plugged into your Mac via USB, the simulator will detect the `/dev/tty.usbmodem` port and give you full hardware connectivity instantly.
-- **Running on Physical iOS Device**: The app uses `dlopen` to load `libpm3client.dylib` into the app's process memory, creating a dedicated C-thread for the PM3 engine and routing stdin/stdout over to the SwiftUI terminal.
+### 3. Build and run
 
-## Roadmap & Notes
-- **Proxmark 5 Support**: Native BLE and Wi-Fi Direct to the PM5 BWM module.
+Open `ProxBuddy.xcodeproj` in Xcode and set your Team under Signing & Capabilities.
+
+- **Physical iPhone** — the app `dlopen`s `libpm3client.dylib` on a background thread and relays the client’s UART to the PM5 over BLE or TCP. Pick **PM5 BLE** or **Wi-Fi Direct** on the Devices tab, then connect.
+- **iOS Simulator** — plug a USB Proxmark into the Mac (RDV4 and PM5 tested; PM3 Easy should work). The Simulator spawns the host `proxmark3` against the serial port. Install that binary first (`brew install proxmark3`, or build the Iceman client on macOS).
 
 ## License
+
 ProxBuddy is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE) and [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md).

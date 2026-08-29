@@ -27,6 +27,8 @@ final class DumpManagerViewModel: ObservableObject {
 
     func refresh() {
         try? FileManager.default.createDirectory(at: pm3Dir, withIntermediateDirectories: true)
+        CardLocation.purgeRunawaySidecars(in: pm3Dir)
+
         let dumpExts: Set<String> = ["bin", "eml", "json"]
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: pm3Dir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
@@ -34,7 +36,7 @@ final class DumpManagerViewModel: ObservableObject {
         ) else { return }
 
         let loaded = entries
-            .filter { dumpExts.contains($0.pathExtension.lowercased()) }
+            .filter { dumpExts.contains($0.pathExtension.lowercased()) && !CardLocation.isSidecar($0) }
             .compactMap { url -> DumpFile? in
                 let r = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
                 return DumpFile(url: url, modDate: r?.contentModificationDate ?? .now,
@@ -59,12 +61,16 @@ final class DumpManagerViewModel: ObservableObject {
     }
 
     func delete(_ file: DumpFile) {
+        CardLocation.remove(for: file.url)
         try? FileManager.default.removeItem(at: file.url)
         refresh()
     }
 
     func delete(_ group: DumpGroup) {
-        group.files.forEach { try? FileManager.default.removeItem(at: $0.url) }
+        group.files.forEach {
+            CardLocation.remove(for: $0.url)
+            try? FileManager.default.removeItem(at: $0.url)
+        }
         refresh()
     }
 
