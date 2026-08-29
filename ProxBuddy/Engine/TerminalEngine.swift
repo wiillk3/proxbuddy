@@ -184,6 +184,11 @@ final class TerminalEngine: ObservableObject {
     }
 
     private func captureRaw(_ command: String, silent: Bool) async -> [String] {
+        if let existing = captureContinuation {
+            existing.resume(returning: captureBuffer)
+            captureContinuation = nil
+            captureMode = false
+        }
         captureSilent = silent
         captureMode = true
         captureBuffer = []
@@ -194,10 +199,7 @@ final class TerminalEngine: ObservableObject {
     }
 
     private func isBarePrompt(_ clean: String) -> Bool {
-        guard clean.contains("pm3 -->") else { return false }
-        // A real prompt waiting for input ends exactly with "pm3 --> "
-        // If it echoes input (e.g. "pm3 --> help") it won't end with "-->"
-        return clean.trimmingCharacters(in: .whitespaces).hasSuffix("-->")
+        ANSIParser.isClientPrompt(clean)
     }
 
     // MARK: - Command

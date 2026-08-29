@@ -11,7 +11,8 @@ struct ANSIParser {
     static let inputDefaultUI = UIColor(red: 0.0, green: 0.8, blue: 0.2, alpha: 1.0)
 
     private static let stripRegex: NSRegularExpression = {
-        try! NSRegularExpression(pattern: "\u{1B}\\[[0-9;]*[a-zA-Z]")
+        // SGR colors plus private-mode CSI (readline bracketed paste: ESC[?2004h/l)
+        try! NSRegularExpression(pattern: "\u{1B}\\[[?0-9;]*[a-zA-Z]")
     }()
 
     private static let pm3PrefixRegex: NSRegularExpression = {
@@ -21,6 +22,13 @@ struct ANSIParser {
     static func strip(_ s: String) -> String {
         let range = NSRange(s.startIndex..., in: s)
         return stripRegex.stringByReplacingMatches(in: s, options: [], range: range, withTemplate: "")
+    }
+
+    /// Native host client prints `[usb] pm5 -->`; the iOS dylib prints `pm3 -->`.
+    static func isClientPrompt(_ s: String) -> Bool {
+        let clean = strip(s).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clean.hasSuffix("-->") else { return false }
+        return clean.contains("pm3 -->") || clean.contains("pm5 -->")
     }
 
     static func stripPM3Prefix(_ s: String) -> String {

@@ -5,18 +5,31 @@ import Foundation
 // /dev/tty.usbmodem* and the host filesystem. We skip the transport layer
 // entirely and hand the macOS pm3 binary the real USB serial port.
 enum SimulatorBoot {
+    /// Set this to your host `proxmark3` binary if it is not in the search list below.
+    /// `~` is the Mac home (`/Users/you`), not the Simulator container.
+    /// Example: `"~/d3v/proxmark/proxmark3/client/proxmark3"`
+    /// Leave empty to search ~/proxmark3, Homebrew, /usr/local/bin, then PATH.
+    static let clientPath: String = "~/d3v/proxmark/proxmark3/client/proxmark3"
+
     static func pm3BinaryPath() -> String? {
+        let override = clientPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !override.isEmpty {
+            let expanded = expandHome(override)
+            if FileManager.default.isExecutableFile(atPath: expanded) {
+                return expanded
+            }
+            NSLog("[ProxBuddy] SimulatorBoot.clientPath is not executable: \(expanded)")
+            return nil
+        }
+
         var seen = Set<String>()
         var candidates: [String] = [
-            NSHomeDirectory() + "/proxmark3/client/proxmark3",
+            macHomeDirectory + "/proxmark3/client/proxmark3",
             "/opt/homebrew/bin/proxmark3",
             "/usr/local/bin/proxmark3",
         ]
         if let path = ProcessInfo.processInfo.environment["PATH"] {
             candidates += path.split(separator: ":").map { "\($0)/proxmark3" }
-        }
-        if let resolved = which("proxmark3") {
-            candidates.append(resolved)
         }
         return candidates.first { path in
             seen.insert(path).inserted
@@ -41,26 +54,23 @@ enum SimulatorBoot {
         return "sim: \(bin.split(separator: "/").last ?? "?") · \(port)"
     }
 
-    /// Xcode's Simulator PATH often omits Homebrew; a login shell still sees it.
-    private static func which(_ name: String) -> String? {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        proc.arguments = ["-lc", "command -v \(name)"]
-        let out = Pipe()
-        proc.standardOutput = out
-        proc.standardError = FileHandle.nullDevice
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-        } catch {
-            return nil
+    /// Simulator `NSHomeDirectory()` is
+    /// `/Users/<you>/Library/Developer/CoreSimulator/Devices/...`
+    /// `getpwuid` is not reliable here; peel the Mac home off that path.
+    private static var macHomeDirectory: String {
+        let home = NSHomeDirectory()
+        if let range = home.range(of: "/Library/Developer/CoreSimulator/") {
+            return String(home[..<range.lowerBound])
         }
-        guard proc.terminationStatus == 0,
-              let data = try? out.fileHandleForReading.readToEnd(),
-              let s = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-              !s.isEmpty else { return nil }
-        return s
+        return home
+    }
+
+    private static func expandHome(_ path: String) -> String {
+        if path == "~" { return macHomeDirectory }
+        if path.hasPrefix("~/") {
+            return macHomeDirectory + "/" + path.dropFirst(2)
+        }
+        return path
     }
 }
 #endif

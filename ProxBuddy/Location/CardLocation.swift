@@ -45,7 +45,7 @@ struct CardLocation: Codable, Equatable, Identifiable {
     static func load(for dumpURL: URL) -> CardLocation? {
         for url in [sidecarURL(for: dumpURL), legacySidecarURL(for: dumpURL)] {
             guard let data = try? Data(contentsOf: url),
-                  let loc = try? decoder.decode(CardLocation.self, from: data) else {
+                  let loc = try? Self.makeDecoder().decode(CardLocation.self, from: data) else {
                 continue
             }
             return loc
@@ -55,7 +55,10 @@ struct CardLocation: Codable, Equatable, Identifiable {
 
     func save(for dumpURL: URL) {
         let url = CardLocation.sidecarURL(for: dumpURL)
-        guard let data = try? Self.encoder.encode(self) else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(self) else { return }
         try? data.write(to: url, options: .atomic)
         try? FileManager.default.removeItem(at: CardLocation.legacySidecarURL(for: dumpURL))
     }
@@ -78,19 +81,15 @@ struct CardLocation: Codable, Equatable, Identifiable {
         }
     }
 
-    private static let encoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.outputFormatting = [.prettyPrinted, .sortedKeys]
-        e.dateEncodingStrategy = .iso8601
-        return e
-    }()
-
-    private static let decoder: JSONDecoder = {
+    private static func makeDecoder() -> JSONDecoder {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .custom { decoder in
             let c = try decoder.singleValueContainer()
             if let s = try? c.decode(String.self) {
-                if let date = fractionalISO.date(from: s) ?? plainISO.date(from: s) {
+                if let date = try? Date(s, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)) {
+                    return date
+                }
+                if let date = try? Date(s, strategy: Date.ISO8601FormatStyle()) {
                     return date
                 }
             }
@@ -100,17 +99,5 @@ struct CardLocation: Codable, Equatable, Identifiable {
             throw DecodingError.dataCorruptedError(in: c, debugDescription: "unsupported date")
         }
         return d
-    }()
-
-    private static let fractionalISO: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    private static let plainISO: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
+    }
 }

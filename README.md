@@ -63,7 +63,7 @@ If Xcode’s **Install Python stdlib** phase fails with `rsync` / `(l)stat` / `i
 Open `ProxBuddy.xcodeproj` in Xcode and set your Team under Signing & Capabilities.
 
 - **Physical iPhone** — the app `dlopen`s `libpm3client.dylib` on a background thread and relays the client’s UART to the PM5 over BLE or TCP. Pick **PM5 BLE** or **Wi-Fi Direct** on the Devices tab, then connect.
-- **iOS Simulator** — plug a USB Proxmark into the Mac (RDV4 and PM5 tested; PM3 Easy should work). The Simulator looks for a host `proxmark3` at `~/proxmark3/client/proxmark3`, Homebrew, `/usr/local/bin` (`sudo make install`), then `PATH`.
+- **iOS Simulator** — plug a USB Proxmark into the Mac (RDV4 and PM5 tested; PM3 Easy should work). If the host `proxmark3` is not at `~/proxmark3`, Homebrew, or `/usr/local/bin`, set `SimulatorBoot.clientPath` in `ProxBuddy/Runner/SimulatorBoot.swift`.
 
 ## License
 

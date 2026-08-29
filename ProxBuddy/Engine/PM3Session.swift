@@ -114,8 +114,16 @@ final class PM3Session: ObservableObject, Identifiable {
         runner.resetStream()
 
         #if targetEnvironment(simulator)
-        guard let pm3  = SimulatorBoot.pm3BinaryPath() else { return }
-        guard let port = SimulatorBoot.usbSerialPort()  else { return }
+        guard let pm3  = SimulatorBoot.pm3BinaryPath() else {
+            engine.append(raw: "[!] boot: no host proxmark3 binary found — set SimulatorBoot.clientPath", isInput: false)
+            return
+        }
+        guard let port = SimulatorBoot.usbSerialPort()  else {
+            engine.append(raw: "[!] boot: no USB serial port", isInput: false)
+            return
+        }
+        engine.append(raw: "[=] sim: \(pm3) · \(port)", isInput: false)
+        NSLog("[ProxBuddy] sim client \(pm3) port \(port)")
         do {
             try await runner.launch(binaryPath: pm3, portPath: port)
         } catch {
