@@ -196,12 +196,14 @@ struct CommandPageView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                Spacer()
+                Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -389,12 +391,14 @@ struct ScriptBrowserView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Spacer()
+            Spacer(minLength: 0)
             Image(systemName: "chevron.right")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private func sectionTitle(_ ext: String) -> String {

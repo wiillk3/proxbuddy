@@ -306,9 +306,6 @@ private struct BuilderHelpAndOptions: View {
 
     var body: some View {
         if let help = vm.commandHelp {
-            if !help.summary.isEmpty {
-                labeledBlock("ABOUT", help.summary)
-            }
             if !help.usage.isEmpty {
                 labeledBlock("USAGE", help.usage)
             }
@@ -343,6 +340,10 @@ private struct BuilderHelpAndOptions: View {
                     }
                     .builderPanel()
                 }
+            }
+
+            if !help.summary.isEmpty {
+                labeledBlock("ABOUT", help.summary)
             }
         }
     }
