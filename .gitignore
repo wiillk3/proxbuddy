@@ -58,6 +58,8 @@ ProxBuddy/libpm3client.dylib
 *.log
 *.txt
 *.json
+# App icon catalog — Contents.json would otherwise match *.json
+!ProxBuddy/Assets.xcassets/**/*.json
 *.eml
 *.bin
 
