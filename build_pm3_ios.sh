@@ -21,6 +21,11 @@
 #     add_executable → add_library(SHARED) and injects iOS Python paths.
 #   - patches/ios-pm3-no-process-exit.patch plus pm3_ios_exit.c intercept
 #     libc exit() so the in-process client cannot terminate the iOS app.
+#   - patches/ios-pm3-startup-banner.patch compiles the interactive ASCII banner
+#     into LIBPM3 and enables ANSI/emoji so ProxBuddy can print it after connect.
+#   - Client version is snapshotted from the Iceman clone *before* iOS patches
+#     (out-of-tree CMake is not a git repo, so mkversion.sh would otherwise emit
+#     "Iceman/master/release (git)").
 #   - bzip2 and lz4 are pre-built for iOS before cmake runs so cmake's
 #     find_package/find_library picks up the iOS statics.
 #   - readline/ncurses are replaced by linenoise (SKIPREADLINE=1).
@@ -74,7 +79,7 @@ PM3_SRC="$(cd "$PM3_SRC" && pwd)"
 # Ensure we always restore the upstream CMakeLists.txt even if the script fails
 cleanup() {
     if [ -d "$PM3_SRC/.git" ]; then
-        git -C "$PM3_SRC" checkout -- client/CMakeLists.txt client/src/pm3.c client/src/cmdscript.c 2>/dev/null || true
+        git -C "$PM3_SRC" checkout -- client/CMakeLists.txt client/src/pm3.c client/src/cmdscript.c client/src/proxmark3.c client/include/pm3.h 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
@@ -285,6 +290,20 @@ if [ ! -f "$PM3_SRC/client/src/pm3_pywrap.c" ]; then
     exit 1
 fi
 
+# Snapshot client version from a still-clean Iceman tree. CMake runs from
+# /tmp/pm3-ios-build/cmake (not a git repo), so mkversion.sh would otherwise
+# bake in "Iceman/master/release (git)". iOS patches applied next would also
+# make `git describe --dirty` lie.
+echo "==> Recording Iceman client version..."
+mkdir -p "$BUILD_DIR"
+PM3_VERSION_C="$BUILD_DIR/version_pm3.c.good"
+if (cd "$PM3_SRC" && sh tools/mkversion.sh --force "$PM3_VERSION_C"); then
+    echo "==> Client version: $(cd "$PM3_SRC" && sh tools/mkversion.sh --short)"
+else
+    echo "warning: mkversion.sh failed, using default_version_pm3.c"
+    cp "$PM3_SRC/common/default_version_pm3.c" "$PM3_VERSION_C"
+fi
+
 # ── Apply iOS patch to CMakeLists.txt ─────────────────────────────────────────
 # Replaces the fragile sed approach — uses a committed patch file with
 # placeholder tokens for Python paths.
@@ -303,6 +322,7 @@ fi
 sed -e "s|@PYTHON_INC_DIR@|${PYTHON_INC_DIR}|g" \
     -e "s|@PYTHON_LIB@|${PYTHON_LIB}|g" \
     -e "s|@PROXBUDDY_PATCHES@|${SCRIPT_DIR}/patches|g" \
+    -e "s|@PM3_VERSION_C@|${PM3_VERSION_C}|g" \
     "$PATCH_SRC" > "$PATCH_TMP"
 
 # Apply the patch — will fail loudly if upstream CMakeLists has changed
@@ -316,6 +336,10 @@ echo "==> no-process-exit patch applied."
 echo "==> Applying iOS Python os._exit wrap patch..."
 git -C "$PM3_SRC" apply "$SCRIPT_DIR/patches/ios-pm3-python-no-os-exit.patch"
 echo "==> Python os._exit wrap applied."
+
+echo "==> Applying iOS startup-banner patch..."
+git -C "$PM3_SRC" apply "$SCRIPT_DIR/patches/ios-pm3-startup-banner.patch"
+echo "==> startup-banner patch applied."
 
 # ── CMake configure ───────────────────────────────────────────────────────────
 # No -DCMAKE_TOOLCHAIN_FILE — that's intentional. See header comment.

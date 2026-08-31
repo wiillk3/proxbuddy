@@ -1,0 +1,63 @@
+--- a/client/src/proxmark3.c
++++ b/client/src/proxmark3.c
+@@ -45,7 +45,8 @@
+ 
+ static int mainret = PM3_SUCCESS;
+ 
+-#ifndef LIBPM3
++// Compiled for LIBPM3 as well so the iOS in-process client can print the
++// interactive startup banner after pm3_open.
+ #define BANNERMSG1 ""
+ #define BANNERMSG2 ""
+ #define BANNERMSG3 ""
+@@ -283,7 +284,7 @@
+     }
+ }
+ 
+-static void showBanner(void) {
++void pm3_show_banner(void) {
+     uint8_t old_printAndLog = g_printAndLog;
+     g_printAndLog &= PRINTANDLOG_PRINT;
+     PrintAndLogEx(NORMAL, "\n");
+@@ -309,7 +310,6 @@
+     fflush(stdout);
+     g_printAndLog = old_printAndLog;
+ }
+-#endif //LIBPM3
+ 
+ static const char *prompt_dev = "";
+ static const char *prompt_ctx = "";
+@@ -1105,8 +1105,14 @@
+     g_session.pm3_present = false;
+     g_session.help_dump_mode = false;
+     g_session.incognito = false;
++#ifdef LIBPM3
++    // iOS: stdout is captured into TerminalEngine, which understands ANSI + emoji.
++    g_session.supports_colors = true;
++    g_session.emoji_mode = EMO_EMOJI;
++#else
+     g_session.supports_colors = false;
+     g_session.emoji_mode = EMO_ALTTEXT;
++#endif
+     g_session.stdinOnTTY = false;
+     g_session.stdoutOnTTY = false;
+ 
+@@ -1553,7 +1559,7 @@
+ 
+     // ascii art only in interactive client
+     if (!script_cmds_file && !script_cmd && g_session.stdinOnTTY && g_session.stdoutOnTTY && (dumpmem_mode == false) && (flash_mode == false) && (reboot_bootloader_mode == false)) {
+-        showBanner();
++        pm3_show_banner();
+     }
+ 
+     // Save settings if not loaded from settings json file.
+--- a/client/include/pm3.h
++++ b/client/include/pm3.h
+@@ -21,6 +21,7 @@
+ typedef struct pm3_device pm3;
+ 
+ pm3 *pm3_open(const char *port);
++void pm3_show_banner(void);
+ int pm3_console(pm3 *dev, const char *cmd, bool capture, bool quiet);
+ const char *pm3_grabbed_output_get(pm3 *dev);
+ const char *pm3_name_get(pm3 *dev);

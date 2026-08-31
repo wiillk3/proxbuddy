@@ -4,6 +4,7 @@ import Foundation
 typealias PM3OpenFunc        = @convention(c) (UnsafePointer<CChar>?) -> OpaquePointer?
 typealias PM3ConsoleFunc     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, Bool, Bool) -> Int32
 typealias PM3CloseFunc       = @convention(c) (OpaquePointer?) -> Void
+typealias PM3VoidFunc        = @convention(c) () -> Void
 
 /// Return codes from Iceman `include/pm3_cmd.h`. `quit` / `exit` return `quit`
 /// rather than calling libc `exit()`; `fatal` is how the standalone client
@@ -215,6 +216,13 @@ final class BinaryRunner: ObservableObject {
         let pm3Open    = unsafeBitCast(openSym,    to: PM3OpenFunc.self)
         let pm3Console = unsafeBitCast(consoleSym, to: PM3ConsoleFunc.self)
         let pm3Close   = unsafeBitCast(closeSym,   to: PM3CloseFunc.self)
+        // Optional: compiled out of older LIBPM3 builds; present after ios-pm3-startup-banner.patch.
+        let pm3ShowBanner: PM3VoidFunc? = dlsym(handle, "pm3_show_banner").map {
+            unsafeBitCast($0, to: PM3VoidFunc.self)
+        }
+        let pm3VersionShort: PM3VoidFunc? = dlsym(handle, "pm3_version_short").map {
+            unsafeBitCast($0, to: PM3VoidFunc.self)
+        }
 
         let savedStdout = dup(STDOUT_FILENO)
 
@@ -274,6 +282,8 @@ final class BinaryRunner: ObservableObject {
                     pm3Open: pm3Open,
                     pm3Console: pm3Console,
                     pm3Close: pm3Close,
+                    pm3ShowBanner: pm3ShowBanner,
+                    pm3VersionShort: pm3VersionShort,
                     connectionString: connectionString,
                     savedStdout: savedStdout,
                     cmdQueue: cmdQueue,
@@ -289,6 +299,8 @@ final class BinaryRunner: ObservableObject {
                     pm3Open: pm3Open,
                     pm3Console: pm3Console,
                     pm3Close: pm3Close,
+                    pm3ShowBanner: pm3ShowBanner,
+                    pm3VersionShort: pm3VersionShort,
                     connectionString: connectionString,
                     savedStdout: savedStdout,
                     cmdQueue: cmdQueue,
@@ -327,6 +339,8 @@ final class BinaryRunner: ObservableObject {
         pm3Open: PM3OpenFunc,
         pm3Console: PM3ConsoleFunc,
         pm3Close: PM3CloseFunc,
+        pm3ShowBanner: PM3VoidFunc?,
+        pm3VersionShort: PM3VoidFunc?,
         connectionString: String,
         savedStdout: Int32,
         cmdQueue: MutexBox<[String]>,
@@ -346,6 +360,11 @@ final class BinaryRunner: ObservableObject {
                 return
             }
             onOpened?()
+
+            // Same sequence as the desktop interactive client: ASCII banner +
+            // short hw/client/bootrom/OS block, then the prompt.
+            pm3ShowBanner?()
+            pm3VersionShort?()
 
             fputs("pm3 --> ", stdout)
             fflush(stdout)
