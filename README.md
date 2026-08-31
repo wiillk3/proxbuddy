@@ -54,7 +54,12 @@ brew install xcodegen   # if needed
 xcodegen
 ```
 
-Run step 1 **before** `xcodegen`. The project file is generated and not committed.
+Run step 1 **before** `xcodegen` on a fresh clone. The project file is generated and not committed.
+
+After that, re-run only what changed:
+
+- Iceman client, scripts, or Python bundle — `./build_pm3_ios.sh ~/proxmark3` (add `--update-pm3-git` to pull upstream first)
+- `project.yml` — `xcodegen`
 
 If Xcode’s **Install Python stdlib** phase fails with `rsync` / `(l)stat` / `ios-arm64/lib`, pull, run `xcodegen` again, and rebuild.
 

@@ -58,4 +58,4 @@ We extend our deepest gratitude to the open-source projects, maintainers, and ha
 ### License Summaries & Compliance
 
 - **Copyleft Compliance**: Because ProxBuddy links against GPL-licensed components (`libpm3client`), ProxBuddy is distributed under the GPL-3.0 license.
-- **Source Availability**: The complete source code of ProxBuddy and the build scripts (`build_pm3_ios.sh`, `setup.sh`) are made freely available to ensure full compliance with GPL copyleft requirements.
+- **Source Availability**: The complete source code of ProxBuddy and the build scripts (`build_pm3_ios.sh`) are made freely available to ensure full compliance with GPL copyleft requirements.
