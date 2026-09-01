@@ -76,21 +76,34 @@ final class PM3Session: ObservableObject, Identifiable {
         let storedPort = UserDefaults.standard.integer(forKey: Self.wifiPortKey)
         self.wifiPort = (1...65535).contains(storedPort) ? UInt16(storedPort) : 7777
         self.wifiSSID = UserDefaults.standard.string(forKey: Self.wifiSSIDKey) ?? ""
+        // `@Published` emits in `willSet`, so a sink that re-reads `runner.isRunning`
+        // still sees the previous value. Use the published flag itself.
         runner.$isRunning
-            .sink { [weak self] _ in self?.refreshDerivedStatus() }
+            .sink { [weak self] running in
+                guard let self else { return }
+                if self.isRunning != running { self.isRunning = running }
+                self.refreshDerivedStatus()
+            }
             .store(in: &cancellables)
         #if !targetEnvironment(simulator)
         bleTransport.$connectionState
-            .sink { [weak self] _ in self?.refreshDerivedStatus() }
+            .sink { [weak self] _ in self?.scheduleStatusRefresh() }
             .store(in: &cancellables)
         bleTransport.$connectedPeripheralName
-            .sink { [weak self] _ in self?.refreshDerivedStatus() }
+            .sink { [weak self] _ in self?.scheduleStatusRefresh() }
             .store(in: &cancellables)
         bleTransport.$batteryLevel
-            .sink { [weak self] _ in self?.refreshDerivedStatus() }
+            .sink { [weak self] _ in self?.scheduleStatusRefresh() }
             .store(in: &cancellables)
         #endif
         refreshDerivedStatus()
+    }
+
+    /// Run after the current `@Published` willSet so property reads see the new value.
+    private func scheduleStatusRefresh() {
+        Task { @MainActor [weak self] in
+            self?.refreshDerivedStatus()
+        }
     }
 
     func noteGaugeSoC(_ soc: Int) {
@@ -104,8 +117,7 @@ final class PM3Session: ObservableObject, Identifiable {
     // MARK: - Status
 
     private func refreshDerivedStatus() {
-        let running = runner.isRunning
-        if isRunning != running { isRunning = running }
+        let running = isRunning
         #if targetEnvironment(simulator)
         let nextStatus = running ? "USB direct (sim)" : "Stopped"
         if statusMessage != nextStatus { statusMessage = nextStatus }
