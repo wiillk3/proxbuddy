@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @EnvironmentObject var engine:       TerminalEngine
     @EnvironmentObject var deviceManager: DeviceManager
     @EnvironmentObject var scanHistory:  ScanHistoryStore
 
@@ -12,8 +11,6 @@ struct SettingsView: View {
     @AppStorage("stubCommandFlow") var stubCommandFlow = true
     @AppStorage("stubEmulatorFlow") var stubEmulatorFlow = false
     @AppStorage("enableGPSLocationTagging") var enableGPS = false
-
-    @State private var pm3Version: String = "—"
 
     var body: some View {
         NavigationStack {
@@ -107,7 +104,15 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("ABOUT").hackerText().font(.subheadline).opacity(0.8)
                         VStack(alignment: .leading, spacing: 16) {
-                            HStack { Text("pm3client"); Spacer(); Text(pm3Version).foregroundStyle(.secondary) }
+                            HStack(alignment: .firstTextBaseline) {
+                                Text("pm3client")
+                                Spacer(minLength: 12)
+                                Text(PM3ClientVersion.bundledSummary)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.trailing)
+                                    .textSelection(.enabled)
+                            }
                             Divider().background(Color.glassBorder)
                             HStack { Text("Bundle ID"); Spacer(); Text(Bundle.main.bundleIdentifier ?? "—").foregroundStyle(.secondary) }
                             Divider().background(Color.glassBorder)
@@ -136,7 +141,6 @@ struct SettingsView: View {
             }
             .hackerBackground()
             .navigationTitle("Settings")
-            .task { pm3Version = await fetchPm3Version() }
         }
         .preferredColorScheme(.dark)
     }
@@ -146,13 +150,6 @@ struct SettingsView: View {
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
         return "\(v) (\(b))"
     }
-
-    private func fetchPm3Version() async -> String {
-        let lines = await engine.captureOutputSilent("hw version")
-        let versionLine = lines.first(where: { $0.contains("Iceman") || $0.contains("master") })
-        return versionLine?.trimmingCharacters(in: .whitespaces) ?? "—"
-    }
-
 
     private func purgeOldLogs() {
         guard logRetentionDays > 0 else { return }
