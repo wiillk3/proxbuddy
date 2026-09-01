@@ -91,6 +91,15 @@ final class TerminalEngine: ObservableObject {
     private var captureSilent = false   // true = don't show captured lines in terminal
     private var captureBuffer: [String] = []
     private var captureContinuation: CheckedContinuation<[String], Never>?
+    /// True once the client has printed a prompt and has not yet started another command.
+    private var atPrompt = false
+    private var promptWaiters: [CheckedContinuation<Void, Never>] = []
+    private var captureIdle = true
+    private var captureSlotWaiters: [CheckedContinuation<Void, Never>] = []
+
+    /// Test hooks: capture waits for an idle prompt, then collects until the next one.
+    var isWaitingForPrompt: Bool { !promptWaiters.isEmpty }
+    var isCollectingCapture: Bool { captureMode }
 
     var isPM3Running: Bool { runner?.isRunning == true }
 
@@ -105,68 +114,85 @@ final class TerminalEngine: ObservableObject {
 
     func connect(to runner: BinaryRunner, startSession: Bool = true) async {
         self.runner = runner
+        atPrompt = false
+        if captureMode {
+            captureMode = false
+            captureSilent = false
+            let result = captureBuffer
+            captureBuffer = []
+            captureContinuation?.resume(returning: result)
+            captureContinuation = nil
+        }
         if startSession { beginSession() }
         for await raw in runner.outputStream {
-            let isLive = raw.hasPrefix("\r")
-            let displayLine = isLive ? String(raw.dropFirst()) : raw
-            var skipDisplay = false
+            ingestOutput(raw)
+        }
+    }
 
-            let clean = ANSIParser.strip(displayLine)
-            let trimmedClean = clean.trimmingCharacters(in: .whitespaces)
+    /// Feed one stdout chunk. Tests call this directly; `connect(to:)` uses the live stream.
+    func ingestOutput(_ raw: String) {
+        let isLive = raw.hasPrefix("\r")
+        let displayLine = isLive ? String(raw.dropFirst()) : raw
+        var skipDisplay = false
 
-            // Ignore pure spinner or line-clearing erase frames (e.g. "[/]" or spaces)
-            // that PM3 emits between steps, so they don't erase meaningful text.
-            let isBareSpinnerOrEmpty = trimmedClean.isEmpty ||
-                trimmedClean == "[/]" || trimmedClean == "[-]" ||
-                trimmedClean == "[\\]" || trimmedClean == "[|]"
+        let clean = ANSIParser.strip(displayLine)
+        let trimmedClean = clean.trimmingCharacters(in: .whitespaces)
 
-            if isLive && isBareSpinnerOrEmpty {
-                continue
-            }
+        // Ignore pure spinner or line-clearing erase frames (e.g. "[/]" or spaces)
+        // that PM3 emits between steps, so they don't erase meaningful text.
+        let isBareSpinnerOrEmpty = trimmedClean.isEmpty ||
+            trimmedClean == "[/]" || trimmedClean == "[-]" ||
+            trimmedClean == "[\\]" || trimmedClean == "[|]"
 
-            if captureMode {
-                if isBarePrompt(clean) {
-                    let silent = captureSilent
-                    captureMode = false
-                    captureSilent = false
-                    let result = captureBuffer
-                    captureBuffer = []
-                    captureContinuation?.resume(returning: result)
-                    captureContinuation = nil
-                    if silent { continue }   // also suppress the prompt line
-                } else {
-                    if !trimmedClean.isEmpty { captureBuffer.append(clean) }
-                    if captureSilent { skipDisplay = true }
-                }
+        if isLive && isBareSpinnerOrEmpty {
+            return
+        }
+
+        if captureMode {
+            if isBarePrompt(clean) {
+                let silent = captureSilent
+                captureMode = false
+                captureSilent = false
+                let result = captureBuffer
+                captureBuffer = []
+                captureContinuation?.resume(returning: result)
+                captureContinuation = nil
+                notePrompt()
+                if silent { return }   // also suppress the prompt line
             } else {
-                // Scan detection: accumulate output between prompts
-                if isBarePrompt(clean) {
-                    if !linesSincePrompt.isEmpty,
-                       let record = ScanDetector.detect(lines: linesSincePrompt,
-                                                        command: lastSentCommand,
-                                                        timestamp: lastCommandTimestamp) {
-                        scanHistory?.add(record)
-                    }
-                    linesSincePrompt.removeAll()
-                } else {
-                    if !trimmedClean.isEmpty { linesSincePrompt.append(clean) }
-                }
+                if !trimmedClean.isEmpty { captureBuffer.append(clean) }
+                if captureSilent { skipDisplay = true }
             }
-
-            if skipDisplay { continue }
-
-            if isLive {
-                let liveTag = TerminalLine(raw: displayLine, timestamp: Date(), isInput: false)
-                writeToLog(liveTag)
-                if let idx = lines.indices.last, !lines[idx].isInput {
-                    lines[idx] = liveTag
-                } else {
-                    lines.append(liveTag)
-                    trimIfNeeded()
+        } else {
+            // Scan detection: accumulate output between prompts
+            if isBarePrompt(clean) {
+                if !linesSincePrompt.isEmpty,
+                   let record = ScanDetector.detect(lines: linesSincePrompt,
+                                                    command: lastSentCommand,
+                                                    timestamp: lastCommandTimestamp) {
+                    scanHistory?.add(record)
                 }
+                linesSincePrompt.removeAll()
+                notePrompt()
+            } else if !trimmedClean.isEmpty {
+                atPrompt = false
+                linesSincePrompt.append(clean)
+            }
+        }
+
+        if skipDisplay { return }
+
+        if isLive {
+            let liveTag = TerminalLine(raw: displayLine, timestamp: Date(), isInput: false)
+            writeToLog(liveTag)
+            if let idx = lines.indices.last, !lines[idx].isInput {
+                lines[idx] = liveTag
             } else {
-                append(TerminalLine(raw: raw, timestamp: Date(), isInput: false))
+                lines.append(liveTag)
+                trimIfNeeded()
             }
+        } else {
+            append(TerminalLine(raw: raw, timestamp: Date(), isInput: false))
         }
     }
 
@@ -190,17 +216,63 @@ final class TerminalEngine: ObservableObject {
     }
 
     private func captureRaw(_ command: String, silent: Bool) async -> [String] {
-        if let existing = captureContinuation {
-            existing.resume(returning: captureBuffer)
-            captureContinuation = nil
-            captureMode = false
-        }
+        await acquireCaptureSlot()
+        defer { releaseCaptureSlot() }
+
+        // Startup banner / hw version prints before the first prompt. If we
+        // capture from connect-time, that junk ends the capture on the first
+        // prompt and the command builder parses it as a command list.
+        await waitUntilPrompt()
+
         captureSilent = silent
         captureMode = true
         captureBuffer = []
+        atPrompt = false
         runner?.write(command + "\n")
         return await withCheckedContinuation { cont in
             captureContinuation = cont
+        }
+    }
+
+    private func waitUntilPrompt() async {
+        if atPrompt { return }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            if atPrompt {
+                cont.resume()
+            } else {
+                promptWaiters.append(cont)
+            }
+        }
+    }
+
+    private func notePrompt() {
+        atPrompt = true
+        let waiters = promptWaiters
+        promptWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    private func acquireCaptureSlot() async {
+        if captureIdle {
+            captureIdle = false
+            return
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            if captureIdle {
+                captureIdle = false
+                cont.resume()
+            } else {
+                captureSlotWaiters.append(cont)
+            }
+        }
+    }
+
+    private func releaseCaptureSlot() {
+        if let next = captureSlotWaiters.first {
+            captureSlotWaiters.removeFirst()
+            next.resume()
+        } else {
+            captureIdle = true
         }
     }
 
@@ -239,6 +311,7 @@ final class TerminalEngine: ObservableObject {
             return
         }
 
+        atPrompt = false
         runner?.write(trimmed + "\n")
     }
 
