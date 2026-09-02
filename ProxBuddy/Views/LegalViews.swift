@@ -44,7 +44,7 @@ struct AcknowledgementsView: View {
                     Text(AppLegal.warrantyLine)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Text("ProxBuddy is licensed under the GNU General Public License v3.0 (GPL-3.0). Corresponding source, including iOS patches and build_pm3_ios.sh, is at github.com/spot-rfid/proxbuddy.")
+                    Text("ProxBuddy is licensed under the GNU General Public License v3.0 (GPL-3.0). Corresponding source, including iOS patches and build_pm3_ios.sh, is at github.com/wiillk3/proxbuddy.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

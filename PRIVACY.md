@@ -39,7 +39,7 @@ ProxBuddy is not directed at children.
 
 ## Contact and source
 
-- Source: https://github.com/spot-rfid/proxbuddy
-- Support / issues: https://github.com/spot-rfid/proxbuddy/issues
+- Source: https://github.com/wiillk3/proxbuddy
+- Support / issues: https://github.com/wiillk3/proxbuddy/issues
 
 ProxBuddy is licensed under the GNU General Public License v3.0. The program is provided without warranty.

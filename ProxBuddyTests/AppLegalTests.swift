@@ -6,8 +6,8 @@ struct AppLegalTests {
 
     @Test func sourceAndSupportPointAtThePublicRepo() {
         #expect(AppLegal.sourceURL.host == "github.com")
-        #expect(AppLegal.sourceURL.path == "/spot-rfid/proxbuddy")
-        #expect(AppLegal.supportURL.path == "/spot-rfid/proxbuddy/issues")
+        #expect(AppLegal.sourceURL.path == "/wiillk3/proxbuddy")
+        #expect(AppLegal.supportURL.path == "/wiillk3/proxbuddy/issues")
         #expect(AppLegal.privacyURL.path.hasSuffix("/PRIVACY.md"))
     }
 

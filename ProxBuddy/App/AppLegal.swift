@@ -1,9 +1,9 @@
 import Foundation
 
 enum AppLegal {
-    static let sourceURL = URL(string: "https://github.com/spot-rfid/proxbuddy")!
-    static let supportURL = URL(string: "https://github.com/spot-rfid/proxbuddy/issues")!
-    static let privacyURL = URL(string: "https://github.com/spot-rfid/proxbuddy/blob/main/PRIVACY.md")!
+    static let sourceURL = URL(string: "https://github.com/wiillk3/proxbuddy")!
+    static let supportURL = URL(string: "https://github.com/wiillk3/proxbuddy/issues")!
+    static let privacyURL = URL(string: "https://github.com/wiillk3/proxbuddy/blob/main/PRIVACY.md")!
     static let icemanURL = URL(string: "https://github.com/RfidResearchGroup/proxmark3")!
 
     static let copyrightLine = "Copyright (C) 2026 ProxBuddy Project & Contributors."

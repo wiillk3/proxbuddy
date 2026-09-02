@@ -2,9 +2,9 @@
 
 **ProxBuddy** is an open-source iOS client built to interface with Proxmark3 and Proxmark5 RFID analysis hardware. ProxBuddy is released under the **GNU General Public License v3.0 (GPL-3.0)**.
 
-The program comes with **absolutely no warranty**. Corresponding source, including iOS patches and `build_pm3_ios.sh`, is at [https://github.com/spot-rfid/proxbuddy](https://github.com/spot-rfid/proxbuddy). Full license texts ship in the app (Settings → Open Source Licenses & Credits) and as `ProxBuddy/Legal/`.
+The program comes with **absolutely no warranty**. Corresponding source, including iOS patches and `build_pm3_ios.sh`, is at [https://github.com/wiillk3/proxbuddy](https://github.com/wiillk3/proxbuddy). Full license texts ship in the app (Settings → Open Source Licenses & Credits) and as `ProxBuddy/Legal/`.
 
-Privacy: [PRIVACY.md](PRIVACY.md). Use `https://github.com/spot-rfid/proxbuddy/blob/main/PRIVACY.md` as the App Store Connect privacy URL.
+Privacy: [PRIVACY.md](PRIVACY.md). Use `https://github.com/wiillk3/proxbuddy/blob/main/PRIVACY.md` as the App Store Connect privacy URL.
 
 ---
 
@@ -89,7 +89,7 @@ Privacy: [PRIVACY.md](PRIVACY.md). Use `https://github.com/spot-rfid/proxbuddy/b
 ## 9. ProxBuddy iOS Application
 
 * **Project**: ProxBuddy
-* **Repository**: [https://github.com/spot-rfid/proxbuddy](https://github.com/spot-rfid/proxbuddy)
+* **Repository**: [https://github.com/wiillk3/proxbuddy](https://github.com/wiillk3/proxbuddy)
 * **License**: **GNU General Public License v3.0 (GPL-3.0)**
 
 ---
