@@ -1,7 +1,7 @@
 name: ProxBuddy
 
 options:
-  bundleIdPrefix: rfid.spot
+  bundleIdPrefix: spot.rfid
   deploymentTarget:
     iOS: "26.0"
   createIntermediateGroups: true
@@ -19,7 +19,7 @@ targets:
     type: application
     platform: iOS
     deploymentTarget: "26.0"
-    bundleId: rfid.spot.proxbuddy
+    bundleId: spot.rfid.proxbuddy
 
     sources:
       - path: ProxBuddy
@@ -93,7 +93,7 @@ targets:
       DEVELOPMENT_TEAM: ""            # fill in your Team ID
       CODE_SIGN_IDENTITY: "iPhone Developer"
       PROVISIONING_PROFILE_SPECIFIER: ""
-      PRODUCT_BUNDLE_IDENTIFIER: rfid.spot.proxbuddy
+      PRODUCT_BUNDLE_IDENTIFIER: spot.rfid.proxbuddy
       INFOPLIST_FILE: ProxBuddy/Info.plist
       ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
@@ -134,4 +134,4 @@ targets:
     settings:
       SWIFT_VERSION: "6.0"
       SWIFT_STRICT_CONCURRENCY: complete
-      PRODUCT_BUNDLE_IDENTIFIER: rfid.spot.proxbuddy.tests
+      PRODUCT_BUNDLE_IDENTIFIER: spot.rfid.proxbuddy.tests

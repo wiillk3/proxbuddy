@@ -3,7 +3,7 @@ import Observation
 import UIKit
 import os
 
-private let builderSignposter = OSSignposter(subsystem: "rfid.spot.proxbuddy", category: "CommandBuilder")
+private let builderSignposter = OSSignposter(subsystem: "spot.rfid.proxbuddy", category: "CommandBuilder")
 
 /// Per-option state as its own observable, so flipping one toggle doesn't
 /// invalidate every other row (a `[UUID: Bool]` on the VM would).

@@ -18,14 +18,14 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>ProxBuddy uses the local network to connect to your Proxmark5 over Wi-Fi (STA + TCP).</string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>ProxBuddy can optionally save GPS coordinates next to card dumps you store on this device.</string>
 	<key>UILaunchScreen</key>
