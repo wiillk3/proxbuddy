@@ -622,7 +622,10 @@ struct PM3FilePicker: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        Spacer(minLength: 0)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .listRowBackground(Color.clear)
             }

@@ -147,6 +147,7 @@ struct DumpManagerView: View {
                                     DumpGroupRow(group: group)
                                 }
                                 .buttonStyle(.plain)
+                                .contentShape(Rectangle())
                                 .contextMenu {
                                     Button(role: .destructive) { vm.delete(group) } label: { Label("Delete All", systemImage: "trash") }
                                     if let f = group.primaryFile, let cmd = group.family.eloadCommand(file: f.baseName) {
@@ -213,11 +214,13 @@ struct DumpGroupRow: View {
                     }
                 }
             }
-            Spacer()
+            Spacer(minLength: 0)
             Text(DumpGroupRow.dateFmt.string(from: group.latestDate))
                 .font(.caption2).foregroundStyle(.secondary)
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 
