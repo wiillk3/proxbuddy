@@ -60,6 +60,12 @@ wrap_one() {
 </dict>
 </plist>
 EOF
+    local privacy
+    privacy="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/OpenSSL.xcprivacy"
+    if [[ -f "$privacy" ]] && grep -a -q -E 'OpenSSL|BoringSSL' "$binary"; then
+        cp "$privacy" "$dest/PrivacyInfo.xcprivacy"
+        echo "    OpenSSL privacy manifest -> $dest"
+    fi
     echo "    wrapped $src -> $dest"
 }
 

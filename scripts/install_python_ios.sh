@@ -71,6 +71,23 @@ if [ -z "$PYTHON_VER" ]; then
 fi
 
 echo "Install Python $PYTHON_VER extension modules..."
+
+# BeeWare copies `$MODULE_NAME.xcprivacy` next to a .so into the rewritten
+# framework as PrivacyInfo.xcprivacy. Apple requires that for OpenSSL/BoringSSL
+# (ITMS-91061 on _ssl and _hashlib).
+OPENSSL_PRIVACY="$PROJECT_DIR/scripts/OpenSSL.xcprivacy"
+DYNLOAD="$DEST/$PYTHON_VER/lib-dynload"
+if [[ -f "$OPENSSL_PRIVACY" && -d "$DYNLOAD" ]]; then
+    shopt -s nullglob
+    for so in "$DYNLOAD"/*.so; do
+        if grep -a -q -E 'OpenSSL|BoringSSL' "$so"; then
+            mod="$(basename "$so" | cut -d. -f1)"
+            cp "$OPENSSL_PRIVACY" "$DYNLOAD/${mod}.xcprivacy"
+            echo "OpenSSL privacy manifest for $mod"
+        fi
+    done
+fi
+
 # shellcheck disable=SC1090
 source "$UTILS"
 process_dylibs "$XC_REL" "python/lib/$PYTHON_VER/lib-dynload"
