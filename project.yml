@@ -40,7 +40,16 @@ targets:
           - "Resources/python311.zip"
           - "Resources/python313.zip"
           - "Resources/tools"
+          - "Legal"
+          - "PrivacyInfo.xcprivacy"
         type: group
+      - path: ProxBuddy/Legal
+        type: folder
+        buildPhase: resources
+      - path: ProxBuddy/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: PRIVACY.md
+        buildPhase: resources
       - path: ProxBuddy/Resources/luascripts
         type: folder
       - path: ProxBuddy/Resources/pyscripts
@@ -74,9 +83,8 @@ targets:
         NSLocalNetworkUsageDescription: "ProxBuddy uses the local network to connect to your Proxmark5 over Wi-Fi (STA + TCP)."
         NSBluetoothAlwaysUsageDescription: "ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device."
         NSBluetoothPeripheralUsageDescription: "ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device."
-        NSLocationWhenInUseUsageDescription: "ProxBuddy uses your location to optionally tag RFID/NFC card dumps with GPS coordinates for spatial analysis."
-        UIBackgroundModes:
-          - bluetooth-central
+        NSLocationWhenInUseUsageDescription: "ProxBuddy can optionally save GPS coordinates next to card dumps you store on this device."
+        ITSAppUsesNonExemptEncryption: true
 
     entitlements:
       path: ProxBuddy/ProxBuddy.entitlements

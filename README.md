@@ -78,4 +78,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Short version: branch off `main`, open a
 
 Copyright (C) 2026 ProxBuddy Project & Contributors.
 
-ProxBuddy is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE) and [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md).
+ProxBuddy is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE) and [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md). Privacy policy: [PRIVACY.md](PRIVACY.md) (`https://github.com/spot-rfid/proxbuddy/blob/main/PRIVACY.md` for App Store Connect).

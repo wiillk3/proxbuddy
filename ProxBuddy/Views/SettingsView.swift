@@ -80,7 +80,7 @@ struct SettingsView: View {
                                 }
                             )).tint(.hackerGreen)
                             
-                            Text("Off by default. When enabled, automatically records GPS coordinates, timestamps, and street addresses as sidecar metadata with card dumps.")
+                            Text("Off by default. When enabled, saves coordinates and a place name next to dumps in this app’s Documents folder. Nothing is uploaded.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         .liquidGlassCard()
@@ -118,21 +118,23 @@ struct SettingsView: View {
                             Divider().background(Color.glassBorder)
                             HStack { Text("App version"); Spacer(); Text(appVersion).foregroundStyle(.secondary) }
                             Divider().background(Color.glassBorder)
-                            NavigationLink {
-                                AcknowledgementsView()
-                            } label: {
-                                HStack {
-                                    Label("Open Source Licenses & Credits", systemImage: "doc.text.fill")
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .foregroundStyle(.hackerGreen)
+                            Text(AppLegal.warrantyLine)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Divider().background(Color.glassBorder)
+                            settingsNavLink("Privacy Policy", systemImage: "hand.raised.fill") {
+                                PrivacyPolicyView()
                             }
                             Divider().background(Color.glassBorder)
-                            Link("RRG/Iceman Firmware Repo", destination: URL(string: "https://github.com/RfidResearchGroup/proxmark3")!)
-                                .foregroundStyle(.hackerGreen)
+                            settingsNavLink("Open Source Licenses & Credits", systemImage: "doc.text.fill") {
+                                AcknowledgementsView()
+                            }
+                            Divider().background(Color.glassBorder)
+                            settingsURL("Source code", systemImage: "chevron.left.forwardslash.chevron.right", url: AppLegal.sourceURL)
+                            Divider().background(Color.glassBorder)
+                            settingsURL("Support", systemImage: "questionmark.circle.fill", url: AppLegal.supportURL)
+                            Divider().background(Color.glassBorder)
+                            settingsURL("RRG/Iceman Firmware Repo", systemImage: "link", url: AppLegal.icemanURL)
                         }
                         .liquidGlassCard()
                     }
@@ -143,6 +145,33 @@ struct SettingsView: View {
             .navigationTitle("Settings")
         }
         .preferredColorScheme(.dark)
+    }
+
+    private func settingsNavLink<V: View>(_ title: String, systemImage: String, @ViewBuilder destination: () -> V) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            HStack {
+                Label(title, systemImage: systemImage)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(.hackerGreen)
+        }
+    }
+
+    private func settingsURL(_ title: String, systemImage: String, url: URL) -> some View {
+        Link(destination: url) {
+            HStack {
+                Label(title, systemImage: systemImage)
+                Spacer()
+                Image(systemName: "arrow.up.right.square")
+                    .font(.caption)
+            }
+            .foregroundStyle(.hackerGreen)
+        }
     }
 
     private var appVersion: String {
@@ -165,102 +194,5 @@ struct SettingsView: View {
                 try? fm.removeItem(at: file)
             }
         }
-    }
-}
-
-// MARK: - Open Source Licenses & Acknowledgements View
-
-struct AcknowledgementsView: View {
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // Header card
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("OPEN SOURCE CREDITS")
-                        .hackerText().font(.caption).opacity(0.8)
-                    Text("ProxBuddy is built on the shoulders of giants. We credit and thank the original authors, maintainers, and hardware designers of the open-source RFID analysis ecosystem.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Text("ProxBuddy is licensed under the GNU General Public License v3.0 (GPL-3.0).")
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.hackerGreen)
-                }
-                .liquidGlassCard()
-
-                // 1. Proxmark3 / RRG Iceman
-                creditCard(
-                    title: "Proxmark3 / RRG Iceman Firmware",
-                    authors: "Jonathan Westhues, Iceman (@iceman1001), DXL (@xianglin1998) & RFID Research Group",
-                    license: "GPL-2.0-or-later",
-                    description: "Native C client engine, RFID protocol decoders, and card emulation framework.",
-                    url: "https://github.com/RfidResearchGroup/proxmark3"
-                )
-
-                // 2. Proxmark5 BWM
-                creditCard(
-                    title: "Proxmark5 BWM ESP32 Firmware",
-                    authors: "DXL (@xianglin1998) & RFID Research Group",
-                    license: "GPL-3.0 / Apache-2.0 (ESP-IDF)",
-                    description: "Wireless Bluetooth LE SPP (0xAE86/0xAE88), Battery Service (0x180F), and BWM Wi-Fi station + TCP server.",
-                    url: "https://github.com/RfidResearchGroup/Proxmark5_BWM_esp32"
-                )
-
-                // 3. OpenSSL
-                creditCard(
-                    title: "OpenSSL Cryptographic Toolkit (v3.4.1)",
-                    authors: "The OpenSSL Project Authors",
-                    license: "Apache-2.0",
-                    description: "High-performance cryptographic functions for MIFARE Classic nested attacks and DES brute-forcing.",
-                    url: "https://www.openssl.org"
-                )
-
-                // 4. BeeWare / Python
-                creditCard(
-                    title: "Python for iOS (BeeWare Project)",
-                    authors: "Python Software Foundation & The BeeWare Project",
-                    license: "PSF License & BSD 3-Clause",
-                    description: "Embedded Python 3.13 runtime supporting Proxmark3 Python scripts and extensions.",
-                    url: "https://beeware.org"
-                )
-            }
-            .padding()
-        }
-        .hackerBackground()
-        .navigationTitle("Licenses & Credits")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private func creditCard(title: String, authors: String, license: String, description: String, url: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(title)
-                    .hackerText().font(.subheadline)
-                Spacer()
-                Text(license)
-                    .font(.system(.caption2, design: .monospaced))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Color.hackerGreen.opacity(0.15))
-                    .foregroundStyle(.hackerGreen)
-                    .clipShape(Capsule())
-            }
-            
-            Text("Authors: \(authors)")
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.9))
-
-            Text(description)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Link(destination: URL(string: url)!) {
-                HStack(spacing: 4) {
-                    Text(url).font(.system(.caption2, design: .monospaced))
-                    Image(systemName: "arrow.up.right.square")
-                        .font(.caption2)
-                }
-                .foregroundStyle(.hackerGreen)
-            }
-        }
-        .liquidGlassCard()
     }
 }
