@@ -114,7 +114,7 @@ struct CommandPageView: View {
                     Label("No commands found", systemImage: "questionmark.circle")
                 } description: {
                     Text(commandPath.isEmpty
-                         ? "pm3 may not be connected yet. Pull down to retry."
+                         ? "Connect a Proxmark5, or tap Try demo on the Devices tab."
                          : "\"\(commandPath)\" has no subcommands.")
                 } actions: {
                     Button("Retry") {
@@ -236,8 +236,12 @@ struct FavoriteChip: View {
         .onTapGesture {
             pressed = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { pressed = false }
-            engine.sendCommand(fav.command)
-            appNav.selectedTab = AppNavigation.terminalTab
+            if engine.isDemo {
+                appNav.browserPath = [.builder(fav.command)]
+            } else {
+                engine.sendCommand(fav.command)
+                appNav.selectedTab = AppNavigation.terminalTab
+            }
         }
         .contextMenu {
             Button {

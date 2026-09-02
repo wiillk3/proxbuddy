@@ -63,6 +63,8 @@ final class TerminalEngine: ObservableObject {
     @Published var lines: [TerminalLine] = []
     @Published var isAutoScrolling = true
     @Published var pendingInputText: String? = nil
+    /// Canned help only — `sendCommand` / captures never touch the client.
+    @Published var isDemo = false
 
     private(set) var history: [String] = []
     private var historyIndex = -1
@@ -235,6 +237,10 @@ final class TerminalEngine: ObservableObject {
     }
 
     private func captureRaw(_ command: String, silent: Bool) async -> [String] {
+        if isDemo {
+            return DemoHelpCatalog.lines(for: command)
+        }
+
         await acquireCaptureSlot()
         defer { releaseCaptureSlot() }
 
@@ -315,6 +321,11 @@ final class TerminalEngine: ObservableObject {
         lastSentCommand = trimmed
         lastCommandTimestamp = Date()
         append(TerminalLine(raw: "pm3 --> \(trimmed)", timestamp: Date(), isInput: true))
+
+        if isDemo {
+            append(TerminalLine(raw: DemoHelpCatalog.blockedMessage, timestamp: Date(), isInput: false))
+            return
+        }
 
         // GUI-only commands — intercept before they reach pm3
         if lower.hasPrefix("data plot") {

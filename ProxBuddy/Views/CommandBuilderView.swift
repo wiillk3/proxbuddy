@@ -232,6 +232,7 @@ private struct BuilderToolbar: ToolbarContent {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appNav: AppNavigation
     @EnvironmentObject private var favorites: FavoritesStore
+    @EnvironmentObject private var engine: TerminalEngine
     let autoSwitch: Bool
 
     var body: some ToolbarContent {
@@ -259,7 +260,7 @@ private struct BuilderToolbar: ToolbarContent {
                 dismiss()
                 if autoSwitch { appNav.selectedTab = AppNavigation.terminalTab }
             }
-            .disabled(vm.isLoading || !vm.isSendable)
+            .disabled(vm.isLoading || !vm.isSendable || engine.isDemo)
         }
     }
 }

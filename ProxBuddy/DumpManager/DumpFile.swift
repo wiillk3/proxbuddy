@@ -164,6 +164,7 @@ struct DumpGroup: Identifiable {
     let family: CardFamily
     let uid: String?
     var files: [DumpFile]
+    var isDemoSample = false
 
     var location: CardLocation? {
         guard let file = primaryFile else { return nil }

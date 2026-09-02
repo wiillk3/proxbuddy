@@ -38,14 +38,18 @@ struct ContentView: View {
     @ViewBuilder
     private func sessionContent(_ session: PM3Session) -> some View {
         #if targetEnvironment(simulator)
-        mainTabs
-            .environmentObject(session.engine)
-            .environmentObject(session.runner)
+        DemoSessionChrome(session: session) {
+            mainTabs
+                .environmentObject(session.engine)
+                .environmentObject(session.runner)
+        }
         #else
-        mainTabs
-            .environmentObject(session.engine)
-            .environmentObject(session.runner)
-            .environmentObject(session.bleTransport)
+        DemoSessionChrome(session: session) {
+            mainTabs
+                .environmentObject(session.engine)
+                .environmentObject(session.runner)
+                .environmentObject(session.bleTransport)
+        }
         #endif
     }
 
@@ -119,5 +123,30 @@ struct ContentView: View {
             .environmentObject(session.bleTransport)
             .environmentObject(appNav)
         #endif
+    }
+}
+
+/// Observes the session so the demo banner appears/disappears without a TabView rebuild stall.
+private struct DemoSessionChrome<Content: View>: View {
+    @ObservedObject var session: PM3Session
+    let content: Content
+
+    init(session: PM3Session, @ViewBuilder content: () -> Content) {
+        self.session = session
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if session.isDemo {
+                Text("Demo — UI only, nothing is sent")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color.yellow)
+            }
+            content
+        }
     }
 }

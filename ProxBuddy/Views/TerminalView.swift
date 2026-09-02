@@ -136,6 +136,7 @@ struct TerminalView: View {
         return .green
         #else
         if let session = deviceManager.activeSession {
+            if session.isDemo { return .orange }
             switch session.selectedTransportMode {
             case .ble:
                 return (ble.connectionState == .ready && runner.isRunning) ? .green : .yellow
@@ -168,7 +169,7 @@ private struct DevicePickerChip: View {
         Button(action: onSelect) {
             HStack(spacing: 5) {
                 Circle()
-                    .fill(session.isRunning ? Color.green : Color.yellow)
+                    .fill(session.isDemo ? Color.orange : (session.isRunning ? Color.green : Color.yellow))
                     .frame(width: 6, height: 6)
                 Text(session.label)
                     .font(.system(.caption, design: .monospaced))

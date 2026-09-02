@@ -6,6 +6,7 @@ import MapKit
 @MainActor
 final class DumpManagerViewModel: ObservableObject {
     @Published var groups: [DumpGroup] = []
+    var showDemoSample = false
 
     private var allFiles: [DumpFile] = []
     private var lastKnownURLs: Set<URL> = []
@@ -30,10 +31,10 @@ final class DumpManagerViewModel: ObservableObject {
         CardLocation.purgeRunawaySidecars(in: pm3Dir)
 
         let dumpExts: Set<String> = ["bin", "eml", "json"]
-        guard let entries = try? FileManager.default.contentsOfDirectory(
+        let entries = (try? FileManager.default.contentsOfDirectory(
             at: pm3Dir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
             options: .skipsHiddenFiles
-        ) else { return }
+        )) ?? []
 
         let loaded = entries
             .filter { dumpExts.contains($0.pathExtension.lowercased()) && !CardLocation.isSidecar($0) }
@@ -42,12 +43,14 @@ final class DumpManagerViewModel: ObservableObject {
                 return DumpFile(url: url, modDate: r?.contentModificationDate ?? .now,
                                 size: Int64(r?.fileSize ?? 0))
             }
-            .sorted { $0.modDate > $1.modDate }
 
-        // Tag newly detected dumps with GPS coordinates if feature is enabled
+        // Tag newly detected dumps with GPS coordinates if feature is enabled.
+        // Never tag the demo sample (it lives outside Documents/pm3).
         let enableGPS = UserDefaults.standard.bool(forKey: "enableGPSLocationTagging")
         if enableGPS {
-            for file in loaded where !lastKnownURLs.contains(file.url) {
+            let pm3Path = pm3Dir.path
+            for file in loaded where !lastKnownURLs.contains(file.url)
+                && file.url.path.hasPrefix(pm3Path) {
                 if CardLocation.load(for: file.url) == nil,
                    let snapshot = LocationManager.shared.snapshotCurrentLocation() {
                     snapshot.save(for: file.url)
@@ -55,18 +58,30 @@ final class DumpManagerViewModel: ObservableObject {
             }
         }
 
-        allFiles = loaded
-        groups = DumpGroup.group(loaded)
+        var files = loaded
+        if showDemoSample, let demo = try? DemoSampleDump.dumpFile() {
+            files.insert(demo, at: 0)
+        }
+        files.sort { $0.modDate > $1.modDate }
+
+        allFiles = files
+        groups = DumpGroup.group(files).map { group in
+            var g = group
+            g.isDemoSample = (g.id == DemoSampleDump.groupID)
+            return g
+        }
         lastKnownURLs = Set(loaded.map(\.url))
     }
 
     func delete(_ file: DumpFile) {
+        if file.groupKey == DemoSampleDump.groupID { return }
         CardLocation.remove(for: file.url)
         try? FileManager.default.removeItem(at: file.url)
         refresh()
     }
 
     func delete(_ group: DumpGroup) {
+        if group.isDemoSample { return }
         group.files.forEach {
             CardLocation.remove(for: $0.url)
             try? FileManager.default.removeItem(at: $0.url)
@@ -118,7 +133,14 @@ struct DumpManagerView: View {
                 }
             }
         }
-        .onAppear  { vm.startWatching() }
+        .onAppear {
+            vm.showDemoSample = engine.isDemo
+            vm.startWatching()
+        }
+        .onChange(of: engine.isDemo) { _, demo in
+            vm.showDemoSample = demo
+            vm.refresh()
+        }
         .onDisappear { vm.stopWatching() }
     }
 
@@ -149,8 +171,12 @@ struct DumpManagerView: View {
                                 .buttonStyle(.plain)
                                 .contentShape(Rectangle())
                                 .contextMenu {
-                                    Button(role: .destructive) { vm.delete(group) } label: { Label("Delete All", systemImage: "trash") }
-                                    if let f = group.primaryFile, let cmd = group.family.eloadCommand(file: f.baseName) {
+                                    if !group.isDemoSample {
+                                        Button(role: .destructive) { vm.delete(group) } label: { Label("Delete All", systemImage: "trash") }
+                                    }
+                                    if !engine.isDemo,
+                                       let f = group.primaryFile,
+                                       let cmd = group.family.eloadCommand(file: f.baseName) {
                                         Button {
                                             engine.sendCommand(cmd)
                                             appNav.selectedTab = AppNavigation.terminalTab
@@ -204,6 +230,14 @@ struct DumpGroupRow: View {
                             .font(.system(.caption2, design: .monospaced))
                             .padding(.horizontal, 5).padding(.vertical, 2)
                             .background(Color.secondary.opacity(0.18))
+                            .clipShape(Capsule())
+                    }
+                    if group.isDemoSample {
+                        Text("DEMO")
+                            .font(.system(.caption2, design: .monospaced).weight(.bold))
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .foregroundStyle(.orange)
+                            .background(Color.orange.opacity(0.18))
                             .clipShape(Capsule())
                     }
                     if let loc = group.location {
@@ -297,7 +331,17 @@ struct DumpDetailView: View {
                     .foregroundStyle(group.family.tint).font(.system(size: 22))
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(group.family.displayName).font(.headline).foregroundStyle(.primary)
+                HStack(spacing: 8) {
+                    Text(group.family.displayName).font(.headline).foregroundStyle(.primary)
+                    if group.isDemoSample {
+                        Text("DEMO")
+                            .font(.system(.caption2, design: .monospaced).weight(.bold))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .foregroundStyle(.orange)
+                            .background(Color.orange.opacity(0.18))
+                            .clipShape(Capsule())
+                    }
+                }
                 if let dump = parsed {
                     Text(dump.cardLabel).font(.subheadline).foregroundStyle(.secondary)
                     HStack(spacing: 8) {
@@ -528,8 +572,10 @@ struct FilesTabView: View {
                         }
                         .padding(.vertical, 8)
                         .contextMenu {
-                            Button(role: .destructive) { vm.delete(file) } label: {
-                                Label("Delete", systemImage: "trash")
+                            if !group.isDemoSample {
+                                Button(role: .destructive) { vm.delete(file) } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
                         if idx < group.files.count - 1 { Divider().background(Color.glassBorder) }
@@ -548,7 +594,7 @@ struct FilesTabView: View {
 struct ActionsTabView: View {
     let group: DumpGroup
     let parsed: ParsedMFDump?
-    let engine: TerminalEngine
+    @ObservedObject var engine: TerminalEngine
     let appNav: AppNavigation
     @ObservedObject var vm: DumpManagerViewModel
 
@@ -572,7 +618,8 @@ struct ActionsTabView: View {
                             ActionRowSpec(
                                 title: "Restore (gen1)",
                                 icon: "arrow.triangle.2.circlepath",
-                                color: .blue
+                                color: .blue,
+                                disabled: engine.isDemo
                             ) {
                                 engine.sendCommand("hf mf restore -f \(f.baseName)")
                                 appNav.selectedTab = AppNavigation.terminalTab
@@ -580,7 +627,8 @@ struct ActionsTabView: View {
                             ActionRowSpec(
                                 title: "Write (gen4 GTU)",
                                 icon: "square.and.pencil",
-                                color: .indigo
+                                color: .indigo,
+                                disabled: engine.isDemo
                             ) {
                                 engine.sendCommand("hf mf gload -f \(f.baseName)")
                                 appNav.selectedTab = AppNavigation.terminalTab
@@ -594,7 +642,8 @@ struct ActionsTabView: View {
                         title: "Delete All Files",
                         icon: "trash",
                         color: .red,
-                        role: .destructive
+                        role: .destructive,
+                        disabled: group.isDemoSample
                     ) {
                         vm.delete(group)
                     },
@@ -611,7 +660,7 @@ struct ActionsTabView: View {
     private func emulatorActionRows(file: DumpFile) -> [ActionRowSpec] {
         var rows: [ActionRowSpec] = []
         if let cmd = group.family.eloadCommand(file: file.baseName) {
-            rows.append(ActionRowSpec(title: "Load to Emulator", icon: "memorychip", color: .hackerGreen) {
+            rows.append(ActionRowSpec(title: "Load to Emulator", icon: "memorychip", color: .hackerGreen, disabled: engine.isDemo) {
                 if stubEmulator {
                     Task { _ = await engine.captureOutputSilent(cmd) }
                 } else {
@@ -623,7 +672,8 @@ struct ActionsTabView: View {
             rows.append(ActionRowSpec(
                 title: isSimulating ? "Stop Simulation" : "Simulate",
                 icon: isSimulating ? "stop.circle.fill" : "wave.3.right",
-                color: isSimulating ? .red : .orange
+                color: isSimulating ? .red : .orange,
+                disabled: engine.isDemo && !isSimulating
             ) {
                 if isSimulating {
                     engine.sendCommand("q")
@@ -645,7 +695,7 @@ struct ActionsTabView: View {
                 title: isCapturingEview ? "Reading…" : "View Emulator Memory",
                 icon: isCapturingEview ? "hourglass" : "doc.text.magnifyingglass",
                 color: .teal,
-                disabled: isCapturingEview
+                disabled: isCapturingEview || engine.isDemo
             ) {
                 guard !isCapturingEview, let cmd = group.family.eviewCommand else { return }
                 Task {

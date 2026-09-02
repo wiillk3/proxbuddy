@@ -39,6 +39,7 @@ final class PM3Session: ObservableObject, Identifiable {
 
     let id = UUID()
     @Published var label: String
+    @Published private(set) var isDemo = false
     @Published var selectedTransportMode: TransportMode = .ble {
         didSet { refreshDerivedStatus() }
     }
@@ -117,6 +118,14 @@ final class PM3Session: ObservableObject, Identifiable {
     // MARK: - Status
 
     private func refreshDerivedStatus() {
+        if isDemo {
+            let demoStatus = "Demo — UI only"
+            if statusMessage != demoStatus { statusMessage = demoStatus }
+            if isTransportReady { isTransportReady = false }
+            if batteryLevel != nil { batteryLevel = nil }
+            return
+        }
+
         let running = isRunning
         #if targetEnvironment(simulator)
         let nextStatus = running ? "USB direct (sim)" : "Stopped"
@@ -159,8 +168,31 @@ final class PM3Session: ObservableObject, Identifiable {
 
     // MARK: - Lifecycle
 
+    /// Browse Commands / builder without hardware. Does not boot the client.
+    func enterDemo() {
+        #if !targetEnvironment(simulator)
+        if bleTransport.connectionState == .scanning {
+            bleTransport.stopScanning()
+        }
+        bleTransport.disconnect()
+        #endif
+        runner.terminate()
+        isDemo = true
+        engine.isDemo = true
+        refreshDerivedStatus()
+        engine.append(raw: "[=] Demo mode. Browse Commands and the builder. Nothing is sent to hardware.", isInput: false)
+    }
+
+    func exitDemo() {
+        guard isDemo else { return }
+        isDemo = false
+        engine.isDemo = false
+        refreshDerivedStatus()
+    }
+
     /// Full boot — for BLE mode this is called only after BLE reaches .ready.
     func boot(scanHistory: ScanHistoryStore) async {
+        exitDemo()
         engine.scanHistory = scanHistory
         runner.resetStream()
 
@@ -305,6 +337,7 @@ final class PM3Session: ObservableObject, Identifiable {
     }
 
     func terminate() {
+        exitDemo()
         runner.terminate()
         #if !targetEnvironment(simulator)
         bleTransport.disconnect()

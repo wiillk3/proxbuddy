@@ -56,6 +56,7 @@ private struct SessionCardView: View {
     @ObservedObject var session: PM3Session
     @EnvironmentObject var deviceManager: DeviceManager
     @EnvironmentObject var scanHistory:   ScanHistoryStore
+    @EnvironmentObject var appNav:        AppNavigation
     @Binding var editingLabel: UUID?
     @Binding var labelDraft: String
     @Binding var showingInfoSession: PM3Session?
@@ -95,8 +96,8 @@ private struct SessionCardView: View {
                         }
                         .foregroundStyle(.hackerGreen)
                     } else {
-                        Image(systemName: "antenna.radiowaves.left.and.right")
-                            .foregroundStyle(session.isRunning ? .hackerGreen : .secondary)
+                        Image(systemName: session.isDemo ? "play.rectangle" : "antenna.radiowaves.left.and.right")
+                            .foregroundStyle((session.isRunning || session.isDemo) ? .hackerGreen : .secondary)
                             .frame(width: 22)
                         Text(session.label)
                             .hackerText()
@@ -189,7 +190,36 @@ private struct SessionCardView: View {
                 HStack {
                     Text("pm3 client").font(.system(.caption, design: .monospaced)).foregroundStyle(session.isRunning ? .hackerGreen : .secondary)
                     Spacer()
-                    Text(session.isRunning ? "Running" : "Stopped").font(.system(.caption, design: .monospaced)).foregroundStyle(session.isRunning ? .hackerGreen : .secondary)
+                    Text(session.isDemo ? "Not running (demo)" : (session.isRunning ? "Running" : "Stopped"))
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(session.isRunning ? .hackerGreen : .secondary)
+                }
+
+                Divider().background(Color.glassBorder)
+
+                Button {
+                    deviceManager.setActive(session)
+                    if session.isDemo {
+                        appNav.selectedTab = 1
+                    } else {
+                        session.enterDemo()
+                        appNav.selectedTab = 1
+                    }
+                } label: {
+                    Label(
+                        session.isDemo ? "Open Commands (demo)" : "Try demo (no hardware)",
+                        systemImage: "play.rectangle"
+                    )
+                }
+                .foregroundStyle(.hackerGreen)
+
+                if session.isDemo {
+                    Button {
+                        session.exitDemo()
+                    } label: {
+                        Label("Leave demo", systemImage: "stop.circle")
+                    }
+                    .foregroundStyle(.secondary)
                 }
 
                 Divider().background(Color.glassBorder)
