@@ -33,10 +33,6 @@ We do not sell or share personal data. Commands you send over BLE or Wi-Fi go to
 
 Logs follow the retention setting in Settings (default 30 days; “Forever” if you set it to 0). Purge old logs from Settings, delete dumps in the Files tab, or uninstall the app.
 
-## Children
-
-ProxBuddy is not directed at children.
-
 ## Contact and source
 
 - Source: https://github.com/wiillk3/proxbuddy
