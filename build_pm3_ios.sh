@@ -554,6 +554,16 @@ echo ""
 echo "==> Helper tools built:"
 ls -lh "$TOOLS_OUTPUT/"*.dylib 2>/dev/null || echo "    (none)"
 
+echo ""
+echo "==> Wrapping dylibs as frameworks (ITMS-90426)..."
+WRAP="$SCRIPT_DIR/scripts/wrap_dylib_frameworks.sh"
+bash "$WRAP" "$OUTPUT"
+shopt -s nullglob
+tool_dylibs=("$TOOLS_OUTPUT"/*.dylib)
+if ((${#tool_dylibs[@]})); then
+    bash "$WRAP" "${tool_dylibs[@]}"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 echo ""

@@ -19,7 +19,14 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
-	<true/>
+	<false/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>

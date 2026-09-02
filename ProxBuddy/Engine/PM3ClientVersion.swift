@@ -30,8 +30,15 @@ enum PM3ClientVersion {
     }
 
     static func bundledDylibURL() -> URL? {
-        Bundle.main.url(forResource: "libpm3client", withExtension: "dylib", subdirectory: "Frameworks")
-            ?? Bundle.main.url(forResource: "libpm3client", withExtension: "dylib")
+        let candidates: [URL?] = [
+            Bundle.main.privateFrameworksURL?
+                .appendingPathComponent("libpm3client.framework/libpm3client"),
+            Bundle.main.url(forResource: "libpm3client", withExtension: "dylib", subdirectory: "Frameworks"),
+            Bundle.main.url(forResource: "libpm3client", withExtension: "dylib"),
+        ]
+        return candidates.compactMap { $0 }.first {
+            FileManager.default.isReadableFile(atPath: $0.path)
+        }
     }
 
     /// Pulls `Iceman/…` plus the compile timestamp from a libpm3 Mach-O.

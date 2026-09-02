@@ -26,6 +26,7 @@ targets:
         excludes:
           - "Resources/pm3client"
           - "Resources/libpm3client.dylib"
+          - "Resources/libpm3client.framework"
           - "Resources/.gitkeep"
           - "Info.plist"
           - "ProxBuddy.entitlements"
@@ -84,7 +85,12 @@ targets:
         NSBluetoothAlwaysUsageDescription: "ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device."
         NSBluetoothPeripheralUsageDescription: "ProxBuddy uses Bluetooth to scan for and connect directly to your Proxmark5 device."
         NSLocationWhenInUseUsageDescription: "ProxBuddy can optionally save GPS coordinates next to card dumps you store on this device."
-        ITSAppUsesNonExemptEncryption: true
+        ITSAppUsesNonExemptEncryption: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
 
     entitlements:
       path: ProxBuddy/ProxBuddy.entitlements
@@ -98,28 +104,28 @@ targets:
       ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
     dependencies:
-      - framework: ProxBuddy/Resources/libpm3client.dylib
+      - framework: ProxBuddy/Resources/libpm3client.framework
         embed: true
         link: false
       - framework: ProxBuddy/Python.xcframework
         embed: true
         link: true
-      - framework: ProxBuddy/Resources/tools/libstaticnested_0nt.dylib
+      - framework: ProxBuddy/Resources/tools/libstaticnested_0nt.framework
         embed: true
         link: false
-      - framework: ProxBuddy/Resources/tools/libstaticnested_1nt.dylib
+      - framework: ProxBuddy/Resources/tools/libstaticnested_1nt.framework
         embed: true
         link: false
-      - framework: ProxBuddy/Resources/tools/libstaticnested_2nt.dylib
+      - framework: ProxBuddy/Resources/tools/libstaticnested_2nt.framework
         embed: true
         link: false
-      - framework: ProxBuddy/Resources/tools/libstaticnested_2x1nt_rf08s.dylib
+      - framework: ProxBuddy/Resources/tools/libstaticnested_2x1nt_rf08s.framework
         embed: true
         link: false
-      - framework: ProxBuddy/Resources/tools/libstaticnested_2x1nt_rf08s_1key.dylib
+      - framework: ProxBuddy/Resources/tools/libstaticnested_2x1nt_rf08s_1key.framework
         embed: true
         link: false
-      - framework: ProxBuddy/Resources/tools/libmfulc_des_brute.dylib
+      - framework: ProxBuddy/Resources/tools/libmfulc_des_brute.framework
         embed: true
         link: false
 

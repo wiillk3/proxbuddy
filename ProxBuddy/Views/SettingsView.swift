@@ -114,8 +114,6 @@ struct SettingsView: View {
                                     .textSelection(.enabled)
                             }
                             Divider().background(Color.glassBorder)
-                            HStack { Text("Bundle ID"); Spacer(); Text(Bundle.main.bundleIdentifier ?? "—").foregroundStyle(.secondary) }
-                            Divider().background(Color.glassBorder)
                             HStack { Text("App version"); Spacer(); Text(appVersion).foregroundStyle(.secondary) }
                             Divider().background(Color.glassBorder)
                             Text(AppLegal.warrantyLine)

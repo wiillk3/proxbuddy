@@ -77,6 +77,7 @@ ProxBuddy/Resources/pm3-resources/
 ProxBuddy/Resources/pm3client
 ProxBuddy/Resources/tools/*
 !ProxBuddy/Resources/tools/.gitkeep
+ProxBuddy/Resources/libpm3client.framework/
 *.dylib
 
 # MockNUS

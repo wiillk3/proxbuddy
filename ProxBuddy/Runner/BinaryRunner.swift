@@ -124,9 +124,7 @@ final class BinaryRunner: ObservableObject {
     }
 
     private func bundledClientURL() throws -> URL {
-        let bundledURL = Bundle.main.url(forResource: "libpm3client", withExtension: "dylib", subdirectory: "Frameworks")
-            ?? Bundle.main.url(forResource: "libpm3client", withExtension: "dylib")
-        guard let binaryURL = bundledURL else {
+        guard let binaryURL = PM3ClientVersion.bundledDylibURL() else {
             throw RunnerError.binaryNotFound
         }
         return binaryURL

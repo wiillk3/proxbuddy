@@ -216,8 +216,7 @@ final class PM3Session: ObservableObject, Identifiable {
         Task { await engine.connect(to: runner) }
 
         #else
-        let bundledURL = Bundle.main.url(forResource: "libpm3client", withExtension: "dylib", subdirectory: "Frameworks")
-            ?? Bundle.main.url(forResource: "libpm3client", withExtension: "dylib")
+        let bundledURL = PM3ClientVersion.bundledDylibURL()
         engine.append(raw: "[=] boot: \(bundledURL?.path ?? "none")", isInput: false)
         do {
             switch selectedTransportMode {
