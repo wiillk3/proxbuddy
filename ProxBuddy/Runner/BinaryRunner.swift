@@ -553,78 +553,26 @@ final class BinaryRunner: ObservableObject {
         Task.detached(priority: .high) {
             let bufSize = 4096
             var buf = [UInt8](repeating: 0, count: bufSize)
-            var partial = ""
+            var splitter = OutputLineSplitter()
+            var utf8Remainder: [UInt8] = []
 
             while true {
                 let n = read(fd, &buf, bufSize)
                 guard n > 0 else { break }
-                
+
                 if origOut >= 0 {
                     Darwin.write(origOut, buf, n)
                 }
-                
-                let raw = String(bytes: buf[..<n], encoding: .utf8) ?? ""
-                // Strip non-color ANSI control sequences (cursor movement, line
-                // clearing) that linenoise/readline emits on a PTY-backed stdin.
-                // Color sequences (\033[...m) are kept for ANSIParser.
-                partial += BinaryRunner.stripControlEscapes(raw)
 
-                var s = partial[...]
-                partial = ""
-
-                while !s.isEmpty {
-                    if let nl = s.firstIndex(of: "\n") {
-                        if let cr = s.firstIndex(of: "\r"), cr < nl {
-                            // \r before \n
-                            let line = String(s[s.startIndex..<cr])
-                            let afterCR = s.index(after: cr)
-                            if afterCR == nl {
-                                // \r\n — plain newline
-                                _ = continuation.yield(line)
-                                s = s[s.index(after: nl)...]
-                            } else {
-                                // Bare \r then more text before \n — overwrite
-                                _ = continuation.yield("\r" + line)
-                                s = s[afterCR...]
-                            }
-                        } else {
-                            let line = String(s[s.startIndex..<nl])
-                            _ = continuation.yield(line)
-                            s = s[s.index(after: nl)...]
-                        }
-                    } else if let cr = s.firstIndex(of: "\r") {
-                        let after = s.index(after: cr)
-                        if after == s.endIndex {
-                            // CR at end — buffer content+CR, wait to see if \r\n arrives
-                            partial = String(s)
-                            break
-                        } else if s[after] == "\n" {
-                            // \r\n
-                            let line = String(s[s.startIndex..<cr])
-                            _ = continuation.yield(line)
-                            s = s[s.index(after: after)...]
-                        } else {
-                            // Bare \r — live overwrite
-                            let line = String(s[s.startIndex..<cr])
-                            _ = continuation.yield("\r" + line)
-                            s = s[after...]
-                        }
-                    } else {
-                        partial = String(s)
-                        break
-                    }
-                }
-
-                // The pm3 prompt ("pm3 -->") has no trailing newline — it stays in
-                // partial indefinitely. Detect it and yield now so capture logic fires.
-                if !partial.isEmpty && BinaryRunner.looksLikePrompt(partial) {
-                    _ = continuation.yield(partial)
-                    partial = ""
+                utf8Remainder.append(contentsOf: buf[..<n])
+                let raw = BinaryRunner.decodeUTF8(&utf8Remainder)
+                for line in splitter.push(raw) {
+                    _ = continuation.yield(line)
                 }
             }
 
-            if !partial.isEmpty {
-                _ = continuation.yield(partial.replacingOccurrences(of: "\r", with: ""))
+            for line in splitter.finish() {
+                _ = continuation.yield(line)
             }
             continuation.finish()
 
@@ -635,20 +583,41 @@ final class BinaryRunner: ObservableObject {
         }
     }
 
+    /// Decode as much UTF-8 as possible; keep a short incomplete sequence for the next read.
+    /// Mix-mode bars are 3-byte block glyphs, so a 4096-byte cut can otherwise drop a whole chunk.
+    nonisolated static func decodeUTF8(_ bytes: inout [UInt8]) -> String {
+        if bytes.isEmpty { return "" }
+        if let s = String(bytes: bytes, encoding: .utf8) {
+            bytes.removeAll(keepingCapacity: true)
+            return s
+        }
+        let maxHold = min(3, bytes.count)
+        for hold in 1...maxHold {
+            let cut = bytes.count - hold
+            if let s = String(bytes: bytes[..<cut], encoding: .utf8) {
+                bytes.removeFirst(cut)
+                return s
+            }
+        }
+        bytes.removeAll(keepingCapacity: true)
+        return ""
+    }
+
     // pm3 prompt ends with "pm3 --> " but color codes are embedded between "pm3 " and "-->"
     // so we strip all ANSI before checking.
-    private nonisolated static func looksLikePrompt(_ s: String) -> Bool {
+    fileprivate nonisolated static func looksLikePrompt(_ s: String) -> Bool {
         ANSIParser.isClientPrompt(s)
     }
 
     // Keep \033[...m (color) sequences; remove everything else that starts with \033[
     // (\033[K erase-line, \033[0G cursor-col, \033[2J clear-screen, etc.)
-    private nonisolated static func stripControlEscapes(_ s: String) -> String {
+    fileprivate nonisolated static func stripControlEscapes(_ s: String) -> String {
         guard s.contains("\u{1B}") else { return s }
         var result = ""
         result.reserveCapacity(s.count)
         var i = s.startIndex
         while i < s.endIndex {
+            if s[i] == "\u{8}" { i = s.index(after: i); continue }
             guard s[i] == "\u{1B}" else { result.append(s[i]); i = s.index(after: i); continue }
             let next = s.index(after: i)
             guard next < s.endIndex, s[next] == "[" else {
@@ -683,3 +652,73 @@ final class BinaryRunner: ObservableObject {
         }
     }
 }
+
+/// Turns pm3 stdout into committed lines and `\r`-prefixed live overwrites.
+///
+/// Carriage return means "the text after this `\r` replaces the current line"
+/// (`hf tune --mix` bars, `hf search` INPLACE spinners). Text before `\r` was
+/// overwritten and must not be shown. An in-progress live line is flushed so
+/// the UI can paint it before the next delimiter arrives.
+struct OutputLineSplitter {
+    private var partial = ""
+    private var live = false
+
+    mutating func push(_ raw: String) -> [String] {
+        guard !raw.isEmpty || !partial.isEmpty else { return [] }
+        let stripped = BinaryRunner.stripControlEscapes(raw)
+            .replacingOccurrences(of: "\u{8}", with: "")
+        // Swift treats CRLF as one Character, so `\r\n` would never match `"\n"` / `"\r"`.
+        var s = (partial + stripped).replacingOccurrences(of: "\r\n", with: "\n")[...]
+        partial = ""
+        var out: [String] = []
+
+        while !s.isEmpty {
+            if let nl = s.firstIndex(of: "\n") {
+                var chunk = s[s.startIndex..<nl]
+                if chunk.hasSuffix("\r") {
+                    chunk = chunk.dropLast()
+                }
+                out.append(Self.lastCRSegment(chunk))
+                live = false
+                s = s[s.index(after: nl)...]
+            } else if let cr = s.firstIndex(of: "\r") {
+                let after = s.index(after: cr)
+                if after == s.endIndex {
+                    // Might be `\r\n` arriving next — wait.
+                    partial = String(s)
+                    break
+                }
+                // Bare `\r`: subsequent text is the new live line.
+                s = s[after...]
+                live = true
+            } else {
+                partial = String(s)
+                break
+            }
+        }
+
+        if !partial.isEmpty && BinaryRunner.looksLikePrompt(partial) {
+            out.append(partial)
+            partial = ""
+            live = false
+        } else if live && !partial.isEmpty && !partial.hasSuffix("\r") {
+            out.append("\r" + partial)
+        }
+        return out
+    }
+
+    mutating func finish() -> [String] {
+        let leftover = partial.replacingOccurrences(of: "\r", with: "")
+        partial = ""
+        live = false
+        return leftover.isEmpty ? [] : [leftover]
+    }
+
+    private static func lastCRSegment(_ s: Substring) -> String {
+        if let cr = s.lastIndex(of: "\r") {
+            return String(s[s.index(after: cr)...])
+        }
+        return String(s)
+    }
+}
+

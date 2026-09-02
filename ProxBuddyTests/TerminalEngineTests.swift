@@ -109,4 +109,30 @@ struct TerminalEngineTests {
         let lines = await captured
         #expect(lines == ["lf             {low frequency commands...}"])
     }
+
+    @Test func liveSearchTextIsNotReplacedByClockClear() {
+        let engine = TerminalEngine()
+        engine.ingestOutput("pm3 --> ")
+        engine.sendCommand("hf search")
+        engine.ingestOutput("\r 🕚  Searching for TEXKOM tag...")
+        #expect(engine.lines.last?.raw.contains("TEXKOM") == true)
+
+        engine.ingestOutput("\r 🕛                                           ")
+        #expect(engine.lines.last?.raw.contains("TEXKOM") == true)
+        #expect(engine.lines.last?.raw.contains("Searching") == true)
+
+        engine.ingestOutput("\r 🕐  Searching for Fuji/Xerox tag...")
+        #expect(engine.lines.last?.raw.contains("Fuji/Xerox") == true)
+        #expect(engine.lines.filter { $0.raw.contains("Searching") }.count == 1)
+    }
+
+    @Test func liveTuneBarReplacesInPlace() {
+        let engine = TerminalEngine()
+        engine.ingestOutput("[=] Measuring HF antenna")
+        engine.ingestOutput("\r[=] ████ [ 100 mV / 0 V / 0 Vmax ]")
+        engine.ingestOutput("\r[=] ████████ [ 8500 mV /  8 V /  8 Vmax ]")
+        #expect(engine.lines.count == 2)
+        #expect(engine.lines.last?.raw.contains("8500 mV") == true)
+        #expect(engine.lines.last?.raw.contains("████") == true)
+    }
 }

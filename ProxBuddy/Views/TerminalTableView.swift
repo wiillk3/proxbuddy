@@ -118,9 +118,19 @@ struct TerminalTableView: UIViewRepresentable {
             }
             lineMap = map
 
-            if ids == appliedIDs { return }
-
             let isAtBottom = parent.isAutoScrolling
+            if ids == appliedIDs {
+                guard let last = ids.last else { return }
+                var snapshot = ds.snapshot()
+                snapshot.reconfigureItems([last])
+                ds.apply(snapshot, animatingDifferences: false) { [weak self] in
+                    guard let self, isAtBottom, !ids.isEmpty else { return }
+                    let ip = IndexPath(row: ids.count - 1, section: 0)
+                    self.tableView?.scrollToRow(at: ip, at: .bottom, animated: false)
+                }
+                return
+            }
+
             let snapshot: NSDiffableDataSourceSnapshot<Int, UUID>
             if appliedIDs.isEmpty || ids.isEmpty {
                 var full = NSDiffableDataSourceSnapshot<Int, UUID>()

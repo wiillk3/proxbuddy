@@ -2,7 +2,7 @@ import Foundation
 import UIKit
 import os
 
-private let terminalSignposter = OSSignposter(subsystem: "rfid.spot.proxbuddy", category: "Terminal")
+private let terminalSignposter = OSSignposter(subsystem: "spot.rfid.proxbuddy", category: "Terminal")
 
 struct TerminalLine: Identifiable, @unchecked Sendable, Equatable {
     let id: UUID
@@ -101,6 +101,14 @@ final class TerminalEngine: ObservableObject {
     var isWaitingForPrompt: Bool { !promptWaiters.isEmpty }
     var isCollectingCapture: Bool { captureMode }
 
+    /// Last displayed row is an in-place `\r` update (`hf tune` bar, `hf search` spinner).
+    private var lastLineIsLive = false
+
+    private static let clockSpinners: Set<Character> = [
+        "🕐", "🕑", "🕒", "🕓", "🕔", "🕕",
+        "🕖", "🕗", "🕘", "🕙", "🕚", "🕛"
+    ]
+
     var isPM3Running: Bool { runner?.isRunning == true }
 
     /// Set when `data plot` is intercepted — TerminalView observes and shows the chart sheet.
@@ -115,6 +123,7 @@ final class TerminalEngine: ObservableObject {
     func connect(to runner: BinaryRunner, startSession: Bool = true) async {
         self.runner = runner
         atPrompt = false
+        lastLineIsLive = false
         if captureMode {
             captureMode = false
             captureSilent = false
@@ -138,13 +147,9 @@ final class TerminalEngine: ObservableObject {
         let clean = ANSIParser.strip(displayLine)
         let trimmedClean = clean.trimmingCharacters(in: .whitespaces)
 
-        // Ignore pure spinner or line-clearing erase frames (e.g. "[/]" or spaces)
-        // that PM3 emits between steps, so they don't erase meaningful text.
-        let isBareSpinnerOrEmpty = trimmedClean.isEmpty ||
-            trimmedClean == "[/]" || trimmedClean == "[-]" ||
-            trimmedClean == "[\\]" || trimmedClean == "[|]"
-
-        if isLive && isBareSpinnerOrEmpty {
+        // Ignore pure spinner or line-clearing erase frames (e.g. "[/]", clock emoji,
+        // or spaces) that PM3 emits between steps, so they don't erase meaningful text.
+        if isLive && isEraseOrSpinnerFrame(trimmedClean) {
             return
         }
 
@@ -183,15 +188,29 @@ final class TerminalEngine: ObservableObject {
         if skipDisplay { return }
 
         if isLive {
-            let liveTag = TerminalLine(raw: displayLine, timestamp: Date(), isInput: false)
-            writeToLog(liveTag)
-            if let idx = lines.indices.last, !lines[idx].isInput {
-                lines[idx] = liveTag
+            writeToLog(TerminalLine(raw: displayLine, timestamp: Date(), isInput: false))
+            if lastLineIsLive, let idx = lines.indices.last, !lines[idx].isInput {
+                lines[idx] = TerminalLine(
+                    id: lines[idx].id,
+                    raw: displayLine,
+                    timestamp: Date(),
+                    isInput: false
+                )
             } else {
-                lines.append(liveTag)
+                lines.append(TerminalLine(raw: displayLine, timestamp: Date(), isInput: false))
                 trimIfNeeded()
             }
+            lastLineIsLive = true
         } else {
+            if lastLineIsLive {
+                lastLineIsLive = false
+                if trimmedClean.isEmpty { return }
+                if let idx = lines.indices.last, !lines[idx].isInput {
+                    let existing = ANSIParser.strip(lines[idx].raw)
+                        .trimmingCharacters(in: .whitespaces)
+                    if existing == trimmedClean { return }
+                }
+            }
             append(TerminalLine(raw: raw, timestamp: Date(), isInput: false))
         }
     }
@@ -312,6 +331,7 @@ final class TerminalEngine: ObservableObject {
         }
 
         atPrompt = false
+        lastLineIsLive = false
         runner?.write(trimmed + "\n")
     }
 
@@ -395,9 +415,23 @@ final class TerminalEngine: ObservableObject {
 
     func clearDisplay() {
         lines.removeAll()
+        lastLineIsLive = false
     }
 
     // MARK: - Private
+
+    private func isEraseOrSpinnerFrame(_ trimmedClean: String) -> Bool {
+        if trimmedClean.isEmpty { return true }
+        if trimmedClean == "[/]" || trimmedClean == "[-]"
+            || trimmedClean == "[\\]" || trimmedClean == "[|]" {
+            return true
+        }
+        let emoji = trimmedClean.replacingOccurrences(of: "\u{FE0F}", with: "")
+        if emoji.count == 1, let ch = emoji.first, Self.clockSpinners.contains(ch) {
+            return true
+        }
+        return false
+    }
 
     private func append(_ line: TerminalLine) {
         let state = terminalSignposter.beginInterval("append")
