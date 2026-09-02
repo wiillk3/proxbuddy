@@ -562,88 +562,43 @@ struct ActionsTabView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 if let f = group.primaryFile {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("EMULATOR").hackerText().font(.subheadline).opacity(0.8)
-                        VStack(alignment: .leading, spacing: 16) {
-                            if let cmd = group.family.eloadCommand(file: f.baseName) {
-                                actionRow("Load to Emulator", icon: "memorychip", color: .hackerGreen) {
-                                    if stubEmulator {
-                                        Task { _ = await engine.captureOutputSilent(cmd) }
-                                    } else {
-                                        engine.sendCommand(cmd)
-                                    }
-                                }
-                            }
-
-                            if let simCmd = group.family.simCommand(uid: group.uid, is4K: is4K) {
-                                actionRow(
-                                    isSimulating ? "Stop Simulation" : "Simulate",
-                                    icon: isSimulating ? "stop.circle.fill" : "wave.3.right",
-                                    color: isSimulating ? .red : .orange
-                                ) {
-                                    if isSimulating {
-                                        engine.sendCommand("q")
-                                        isSimulating = false
-                                    } else {
-                                        Task {
-                                            if let eload = group.family.eloadCommand(file: f.baseName) {
-                                                _ = await engine.captureOutputSilent(eload)
-                                            }
-                                            engine.sendCommand(simCmd)
-                                            isSimulating = true
-                                            appNav.selectedTab = AppNavigation.terminalTab
-                                        }
-                                    }
-                                }
-                            }
-
-                            if group.family.eviewCommand != nil {
-                                actionRow(
-                                    isCapturingEview ? "Reading…" : "View Emulator Memory",
-                                    icon: isCapturingEview ? "hourglass" : "doc.text.magnifyingglass",
-                                    color: .teal
-                                ) {
-                                    guard !isCapturingEview, let cmd = group.family.eviewCommand else { return }
-                                    Task {
-                                        isCapturingEview = true
-                                        eviewLines = await engine.captureOutputSilent(cmd)
-                                        isCapturingEview = false
-                                        showEview = true
-                                    }
-                                }
-                                .disabled(isCapturingEview)
-                            }
-                        }
-                        .liquidGlassCard()
+                    let emulatorRows = emulatorActionRows(file: f)
+                    if !emulatorRows.isEmpty {
+                        actionSection("EMULATOR", rows: emulatorRows)
                     }
 
                     if group.family == .mifareClassic {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("WRITE TO PHYSICAL CARD").hackerText().font(.subheadline).opacity(0.8)
-                            VStack(alignment: .leading, spacing: 16) {
-                                actionRow("Restore (gen1)", icon: "arrow.triangle.2.circlepath", color: .blue) {
-                                    engine.sendCommand("hf mf restore -f \(f.baseName)")
-                                    appNav.selectedTab = AppNavigation.terminalTab
-                                }
-                                actionRow("Write (gen4 GTU)", icon: "square.and.pencil", color: .indigo) {
-                                    engine.sendCommand("hf mf gload -f \(f.baseName)")
-                                    appNav.selectedTab = AppNavigation.terminalTab
-                                }
-                            }
-                            .liquidGlassCard()
-                        }
+                        actionSection("WRITE TO PHYSICAL CARD", rows: [
+                            ActionRowSpec(
+                                title: "Restore (gen1)",
+                                icon: "arrow.triangle.2.circlepath",
+                                color: .blue
+                            ) {
+                                engine.sendCommand("hf mf restore -f \(f.baseName)")
+                                appNav.selectedTab = AppNavigation.terminalTab
+                            },
+                            ActionRowSpec(
+                                title: "Write (gen4 GTU)",
+                                icon: "square.and.pencil",
+                                color: .indigo
+                            ) {
+                                engine.sendCommand("hf mf gload -f \(f.baseName)")
+                                appNav.selectedTab = AppNavigation.terminalTab
+                            },
+                        ])
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("DANGER ZONE").hackerText().font(.subheadline).opacity(0.8)
-                    VStack(alignment: .leading, spacing: 16) {
-                        actionRow("Delete All Files", icon: "trash", color: .red, role: .destructive) {
-                            vm.delete(group)
-                        }
-                    }
-                    .liquidGlassCard()
-                }
+                actionSection("DANGER ZONE", rows: [
+                    ActionRowSpec(
+                        title: "Delete All Files",
+                        icon: "trash",
+                        color: .red,
+                        role: .destructive
+                    ) {
+                        vm.delete(group)
+                    },
+                ])
             }
             .padding()
         }
@@ -651,6 +606,57 @@ struct ActionsTabView: View {
         .sheet(isPresented: $showEview) {
             EmulatorMemorySheet(lines: eviewLines)
         }
+    }
+
+    private func emulatorActionRows(file: DumpFile) -> [ActionRowSpec] {
+        var rows: [ActionRowSpec] = []
+        if let cmd = group.family.eloadCommand(file: file.baseName) {
+            rows.append(ActionRowSpec(title: "Load to Emulator", icon: "memorychip", color: .hackerGreen) {
+                if stubEmulator {
+                    Task { _ = await engine.captureOutputSilent(cmd) }
+                } else {
+                    engine.sendCommand(cmd)
+                }
+            })
+        }
+        if let simCmd = group.family.simCommand(uid: group.uid, is4K: is4K) {
+            rows.append(ActionRowSpec(
+                title: isSimulating ? "Stop Simulation" : "Simulate",
+                icon: isSimulating ? "stop.circle.fill" : "wave.3.right",
+                color: isSimulating ? .red : .orange
+            ) {
+                if isSimulating {
+                    engine.sendCommand("q")
+                    isSimulating = false
+                } else {
+                    Task {
+                        if let eload = group.family.eloadCommand(file: file.baseName) {
+                            _ = await engine.captureOutputSilent(eload)
+                        }
+                        engine.sendCommand(simCmd)
+                        isSimulating = true
+                        appNav.selectedTab = AppNavigation.terminalTab
+                    }
+                }
+            })
+        }
+        if group.family.eviewCommand != nil {
+            rows.append(ActionRowSpec(
+                title: isCapturingEview ? "Reading…" : "View Emulator Memory",
+                icon: isCapturingEview ? "hourglass" : "doc.text.magnifyingglass",
+                color: .teal,
+                disabled: isCapturingEview
+            ) {
+                guard !isCapturingEview, let cmd = group.family.eviewCommand else { return }
+                Task {
+                    isCapturingEview = true
+                    eviewLines = await engine.captureOutputSilent(cmd)
+                    isCapturingEview = false
+                    showEview = true
+                }
+            })
+        }
+        return rows
     }
 
     private var is4K: Bool {
@@ -661,13 +667,48 @@ struct ActionsTabView: View {
         return false
     }
 
-    private func actionRow(_ title: String, icon: String, color: Color,
-                            role: ButtonRole? = nil, action: @escaping () -> Void) -> some View {
-        Button(role: role, action: action) {
-            Label(title, systemImage: icon)
-                .foregroundStyle(role == .destructive ? .red : color)
+    private func actionSection(_ title: String, rows: [ActionRowSpec]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).hackerText().font(.subheadline).opacity(0.8)
+            VStack(spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
+                    actionRow(row)
+                    if idx < rows.count - 1 {
+                        Divider().background(Color.glassBorder)
+                    }
+                }
+            }
+            .liquidGlassCard()
         }
     }
+
+    private func actionRow(_ spec: ActionRowSpec) -> some View {
+        Button(role: spec.role, action: spec.action) {
+            HStack(spacing: 12) {
+                Image(systemName: spec.icon)
+                    .foregroundStyle(spec.role == .destructive ? .red : spec.color)
+                    .frame(width: 22, alignment: .center)
+                Text(spec.title)
+                    .foregroundStyle(spec.role == .destructive ? .red : .primary)
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(spec.disabled)
+    }
+}
+
+private struct ActionRowSpec: Identifiable {
+    var id: String { title }
+    let title: String
+    let icon: String
+    let color: Color
+    var role: ButtonRole? = nil
+    var disabled: Bool = false
+    let action: () -> Void
 }
 
 struct EmulatorMemorySheet: View {
