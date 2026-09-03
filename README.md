@@ -2,6 +2,27 @@
 
 ProxBuddy is a native iOS terminal and companion for **Proxmark5**. It embeds the RRG/Iceman `proxmark3` client (`libpm3client.dylib`) in-process and talks to the PM5 BWM over **Bluetooth LE** or **Wi-Fi** (station + TCP).
 
+## TestFlight
+
+Public beta: [https://testflight.apple.com/join/vwP8HPkv](https://testflight.apple.com/join/vwP8HPkv)
+
+Requires **iOS 26**. No hardware is required to look around (Devices → Try demo). A Proxmark5 is required to talk to tags.
+
+### Match the bundled client
+
+The app ships a specific Iceman client build. Flash the PM5 to the same commit or commands can disagree with firmware.
+
+1. In the app: **Settings → About**. The `pm3client` line looks like `Iceman/master/v4.21611-1177-g83c3f81b1`.
+2. The `g…` suffix is the git commit (`g83c3f81b1` → `83c3f81b1`).
+3. In your [Iceman proxmark3](https://github.com/RfidResearchGroup/proxmark3) clone:
+
+```bash
+git fetch
+git checkout 83c3f81b1   # hash from About, without the leading g
+```
+
+Then build and flash the PM5 the usual Iceman way.
+
 ## Key Features
 
 - **Native terminal** — full pm3 client on device: history, ANSI color, auto-scroll.
@@ -23,14 +44,15 @@ On a **physical iPhone**, connect a PM5 over BLE or Wi-Fi. In the **iOS Simulato
 
 Do not put GNU `ar` ahead of Apple’s on `PATH` (Homebrew `binutils` is the usual culprit). The iOS build must archive with Xcode’s `ar`.
 
-
 ## Getting Started
-Getting Started has been tested on one machine besides the author’s. Please report build errors.
+
+Build steps have been tested on one machine besides the author’s. Please report errors.
+
 ### 1. Compile the iOS client and bundle scripts
 
 ```bash
 git clone https://github.com/RfidResearchGroup/proxmark3.git ~/proxmark3 # if needed
-./build_pm3_ios.sh ~/proxmark3 # you can point it to the location of an already existing repo
+./build_pm3_ios.sh ~/proxmark3 # existing clone is fine
 ```
 
 You must pass the Iceman path. The script:
@@ -78,4 +100,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Short version: branch off `main`, open a
 
 Copyright (C) 2026 ProxBuddy Project & Contributors.
 
-ProxBuddy is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE) and [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md). Privacy policy: [PRIVACY.md](PRIVACY.md) (`https://github.com/wiillk3/proxbuddy/blob/main/PRIVACY.md` for App Store Connect).
+ProxBuddy is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE) and [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md). Privacy policy: [PRIVACY.md](PRIVACY.md).
