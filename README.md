@@ -6,7 +6,6 @@ ProxBuddy is a native iOS terminal and companion for **Proxmark5**. It embeds th
 
 Public beta: [https://testflight.apple.com/join/vwP8HPkv](https://testflight.apple.com/join/vwP8HPkv)
 
-Requires **iOS 26**. No hardware is required to look around (Devices → Try demo). A Proxmark5 is required to talk to tags.
 
 ### Match the bundled client
 
