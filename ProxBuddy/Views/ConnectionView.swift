@@ -462,7 +462,7 @@ private struct WiFiSection: View {
                     .clipShape(Capsule())
             }
 
-            Text("Once the BWM is on Wi-Fi (hw bwmwifi over BLE or USB, once), skip BLE — Connect with the IP it printed. Default port 7777. No mDNS.")
+            Text("Once the BWM is on Wi-Fi (hw bwm wifi over BLE or USB, once), skip BLE — Connect with the IP it printed. Default port 7777. No mDNS.")
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(.secondary)
 
@@ -540,7 +540,7 @@ private struct WiFiSection: View {
                 Button {
                     Task { await session.bringUpWiFi() }
                 } label: {
-                    Label("Join network (hw bwmwifi)", systemImage: "antenna.radiowaves.left.and.right")
+                    Label("Join network (hw bwm wifi)", systemImage: "antenna.radiowaves.left.and.right")
                 }
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.hackerGreen)

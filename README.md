@@ -27,7 +27,7 @@ Then build and flash the PM5 the usual Iceman way.
 - **Native terminal** — full pm3 client on device: history, ANSI color, auto-scroll.
 - **Command builder** — browse commands and options, then send the generated line to the terminal.
 - **Dump manager** — picks up `.bin` / `.json` / `.eml` dumps, shows sector keys and blocks, and can load or write them back through the client.
-- **PM5 radio** — BLE SPP to the BWM, or TCP to the BWM Wi-Fi server (`hw bwmwifi`, default port 7777). Scan and connect from the Devices tab.
+- **PM5 radio** — BLE SPP to the BWM, or TCP to the BWM Wi-Fi server (`hw bwm wifi`, default port 7777). Scan and connect from the Devices tab.
 - **Scripts** — Lua and Python from the Iceman tree run on device (Python 3.13 via BeeWare).
 - **Optional GPS tags** — off by default; can attach location sidecars to dumps.
 
@@ -88,7 +88,7 @@ If Xcode’s **Install Python stdlib** phase fails with `rsync` / `(l)stat` / `i
 
 Open `ProxBuddy.xcodeproj` in Xcode and set your Team under Signing & Capabilities.
 
-- **Physical iPhone** — the app `dlopen`s `libpm3client.dylib` on a background thread. BLE relays the client UART to the PM5 SPP characteristic. Wi-Fi opens `tcp:host:port` the same way desktop `pm3 -p tcp:…` does (bring the BWM up first with `hw bwmwifi` over BLE or USB). Pick **PM5 BLE** or **Wi-Fi** on the Devices tab, then connect.
+- **Physical iPhone** — the app `dlopen`s `libpm3client.dylib` on a background thread. BLE relays the client UART to the PM5 SPP characteristic. Wi-Fi opens `tcp:host:port` the same way desktop `pm3 -p tcp:…` does (bring the BWM up first with `hw bwm wifi` over BLE or USB). Pick **PM5 BLE** or **Wi-Fi** on the Devices tab, then connect.
 - **iOS Simulator** — plug a USB Proxmark into the Mac (RDV4 and PM5 tested; PM3 Easy should work). If the host `proxmark3` is not at `~/proxmark3`, Homebrew, or `/usr/local/bin`, set `SimulatorBoot.clientPath` in `ProxBuddy/Runner/SimulatorBoot.swift`.
 
 ## Contributing

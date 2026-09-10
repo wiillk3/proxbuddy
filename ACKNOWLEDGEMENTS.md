@@ -25,7 +25,7 @@ Privacy: [PRIVACY.md](PRIVACY.md). Use `https://github.com/wiillk3/proxbuddy/blo
 * **Upstream Repository**: [https://github.com/RfidResearchGroup/Proxmark5_BWM_esp32](https://github.com/RfidResearchGroup/Proxmark5_BWM_esp32)
 * **Thanks**: @nieldk and @doegox for getting BLE and Wi-Fi up on the Proxmark5, and to everyone else in that repo whose work over the years got the PM5 here. Named names are a handful of people, not the whole story.
 * **License**: **GPL-3.0 / Apache-2.0 (ESP-IDF)**
-* **Usage in ProxBuddy**: Not bundled. ProxBuddy talks to wireless Bluetooth LE SPP (`0xAE86` / `0xAE88`), Battery Service (`0x180F`), and BWM Wi-Fi station + TCP server (`hw bwmwifi`, default port 7777).
+* **Usage in ProxBuddy**: Not bundled. ProxBuddy talks to wireless Bluetooth LE SPP (`0xAE86` / `0xAE88`), Battery Service (`0x180F`), and BWM Wi-Fi station + TCP server (`hw bwm wifi`, default port 7777).
 
 ---
 

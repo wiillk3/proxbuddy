@@ -14,7 +14,7 @@ enum TransportMode: Hashable, Identifiable {
 }
 
 enum BWMWiFiParse {
-    /// Pulls host/port from `hw bwmwifi` output (`BWM on WiFi at …` / `pm3 -p tcp:…`).
+    /// Pulls host/port from `hw bwm wifi` output (`BWM on WiFi at …` / `pm3 -p tcp:…`).
     static func endpoint(from lines: [String]) -> (host: String, port: UInt16)? {
         let text = lines.joined(separator: "\n")
         if let match = text.firstMatch(of: /tcp:([0-9A-Za-z._-]+):(\d+)/) {
@@ -289,7 +289,7 @@ final class PM3Session: ObservableObject, Identifiable {
             engine.append(raw: "[!] Wi-Fi: SSID is required", isInput: false)
             return
         }
-        var parts = ["hw bwmwifi", "--ssid", Self.cliToken(ssid)]
+        var parts = ["hw bwm wifi", "--ssid", Self.cliToken(ssid)]
         let pwd = wifiPassword
         if !pwd.isEmpty {
             parts += ["--pwd", Self.cliToken(pwd)]
