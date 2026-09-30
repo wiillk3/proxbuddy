@@ -63,6 +63,12 @@ struct FirmwareReleaseCatalogTests {
         #expect(byCommit?.clientCommit == "83c3f81b1")
     }
 
+    @Test func manifestURLsStartWithMainBranch() {
+        let urls = FirmwareReleaseCatalog.manifestURLs()
+        #expect(urls.first?.absoluteString.contains("/main/firmware/manifest.json") == true)
+        #expect(!urls.isEmpty)
+    }
+
     @Test func noMatchForOtherPlatform() throws {
         let manifest = try JSONDecoder().decode(FirmwareReleaseCatalog.Manifest.self, from: Data(sampleManifest.utf8))
         let entry = FirmwareReleaseCatalog.matchingEntry(

@@ -4,7 +4,8 @@ import Foundation
 /// Hosted PM5 firmware keyed to the bundled `libpm3client` git version.
 /// `firmware/manifest.json` is published by `scripts/publish_firmware_release.sh`.
 enum FirmwareReleaseCatalog {
-    static let manifestURL = URL(string: "https://raw.githubusercontent.com/wiillk3/proxbuddy/main/firmware/manifest.json")!
+    static let githubRepo = "wiillk3/proxbuddy"
+    static let mainManifestURL = URL(string: "https://raw.githubusercontent.com/\(githubRepo)/main/firmware/manifest.json")!
     static let defaultPlatform = "PM5"
 
     struct Manifest: Codable, Equatable, Sendable {
@@ -73,10 +74,25 @@ enum FirmwareReleaseCatalog {
         }
     }
 
+    /// URLs to try, in order: `main`, this app’s release tag, then bundled copy.
+    static func manifestURLs() -> [URL] {
+        var urls: [URL] = [mainManifestURL]
+        if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+           !version.isEmpty {
+            let tag = version.hasPrefix("v") ? version : "v\(version)"
+            if let release = URL(string: "https://github.com/\(githubRepo)/releases/download/\(tag)/manifest.json") {
+                urls.append(release)
+            }
+        }
+        return urls
+    }
+
     /// Load manifest from the network, falling back to the copy bundled in the app.
     static func loadManifest() async throws -> Manifest {
-        if let remote = try? await fetchManifest(from: manifestURL) {
-            return remote
+        for url in manifestURLs() {
+            if let remote = try? await fetchManifest(from: url) {
+                return remote
+            }
         }
         if let bundled = bundledManifest() {
             return bundled
