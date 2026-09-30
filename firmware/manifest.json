@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-09-30T06:15:26Z",
+  "updated": "2026-09-30T06:42:13Z",
   "firmware": [
     {
       "client_git_version": "Iceman/HEAD/v4.23346-92-ge6d7cd1f9",
@@ -11,12 +11,12 @@
       "artifacts": {
         "fullimage": {
           "url": "https://github.com/wiillk3/proxbuddy/releases/download/v1.1/fullimage.elf",
-          "sha256": "e84af482e776b7113cda6ed27c346ecc08dfa4de560d05359b2aa510cc54b391",
+          "sha256": "f4613c11adabaac85364377fc699ddb6a4d0e5d14314e279e1c427f8b6a508cf",
           "size": 356452
         },
         "bootrom": {
           "url": "https://github.com/wiillk3/proxbuddy/releases/download/v1.1/bootrom.elf",
-          "sha256": "7b0cbf1f6c01355aa5158855372f859fc1dde52536668f3a83061ec7bbcb98d5",
+          "sha256": "dc945beb9005fcc3b0ba4bde5c7d113e22c5f015cec3e3a4bbfa0b3e8bbad01d",
           "size": 38224
         }
       }
