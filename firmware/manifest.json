@@ -1,7 +1,26 @@
 {
   "schema": 1,
-  "updated": "2026-09-30T07:28:21Z",
+  "updated": "2026-09-30T08:07:08Z",
   "firmware": [
+    {
+      "client_git_version": "Iceman/master/",
+      "client_commit": "",
+      "platform": "PM5",
+      "proxbuddy_version": "1.1",
+      "release_tag": "v1.1",
+      "artifacts": {
+        "fullimage": {
+          "url": "https://github.com/wiillk3/proxbuddy/releases/download/v1.1/fullimage.elf",
+          "sha256": "052f61d90017b06c4c0f24ce74ca699d525b7163b9b18f4f05feec4e31d6389f",
+          "size": 356452
+        },
+        "bootrom": {
+          "url": "https://github.com/wiillk3/proxbuddy/releases/download/v1.1/bootrom.elf",
+          "sha256": "f61296d8c514abb3ba776f8ee964cdfa2d17e892009a5443ac1f5a38a4353fb6",
+          "size": 38224
+        }
+      }
+    },
     {
       "client_git_version": "Iceman/HEAD/v4.23346-92-ge6d7cd1f9",
       "client_commit": "e6d7cd1f9",
