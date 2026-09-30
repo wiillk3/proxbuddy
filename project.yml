@@ -51,6 +51,8 @@ targets:
         buildPhase: resources
       - path: PRIVACY.md
         buildPhase: resources
+      - path: firmware/manifest.json
+        buildPhase: resources
       - path: ProxBuddy/Resources/luascripts
         type: folder
       - path: ProxBuddy/Resources/pyscripts

@@ -5,6 +5,13 @@ typealias PM3OpenFunc        = @convention(c) (UnsafePointer<CChar>?) -> OpaqueP
 typealias PM3ConsoleFunc     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, Bool, Bool) -> Int32
 typealias PM3CloseFunc       = @convention(c) (OpaquePointer?) -> Void
 typealias PM3VoidFunc        = @convention(c) () -> Void
+typealias PM3FlashFunc       = @convention(c) (
+    UnsafePointer<CChar>?,
+    UnsafePointer<UnsafePointer<CChar>?>?,
+    Int32,
+    Bool,
+    Bool
+) -> Int32
 
 /// Return codes from Iceman `include/pm3_cmd.h`. `quit` / `exit` return `quit`
 /// rather than calling libc `exit()`; `fatal` is how the standalone client
@@ -45,6 +52,8 @@ enum RunnerError: Error, LocalizedError {
     case dlopenFailed(String)
     case dlsymFailed(String)
     case tcpOpenFailed(String)
+    case flashUnavailable
+    case flashFailed(Int32)
 
     var errorDescription: String? {
         switch self {
@@ -54,6 +63,8 @@ enum RunnerError: Error, LocalizedError {
         case .dlopenFailed(let s): return "dlopen failed: \(s)"
         case .dlsymFailed(let s): return "dlsym failed: \(s)"
         case .tcpOpenFailed(let s): return "pm3 could not open \(s)"
+        case .flashUnavailable:  return "This client build has no pm3_flash — rebuild libpm3client from the wireless-device-flashing fork"
+        case .flashFailed(let c): return "flash failed (status \(c))"
         }
     }
 }
@@ -69,14 +80,32 @@ final class BinaryRunner: ObservableObject {
     // Serial-port pair created during BLE launch — master is kept for BLETransport relay
     private(set) var portMasterFD: Int32 = -1
 
+    /// A client is attached. Paused counts: `pauseConsole()` stops the console
+    /// thread for a flash but deliberately leaves the link open.
+    var isAttached: Bool { isRunning || processStatus == "Paused" }
+
+    /// True when libpm3 dialed `tcp:host:port` itself rather than going through the
+    /// BLE loopback relay, which is the only link cleared for flashing.
+    var isOnTCP: Bool { isAttached && portMasterFD < 0 }
+
     // libpm3 command pump
     fileprivate var pm3Console: PM3ConsoleFunc?
+    fileprivate var pm3Open: PM3OpenFunc?
+    fileprivate var pm3Close: PM3CloseFunc?
+    fileprivate var pm3Flash: PM3FlashFunc?
+    fileprivate var pm3ShowBanner: PM3VoidFunc?
+    fileprivate var pm3VersionShort: PM3VoidFunc?
     fileprivate let cmdQueue   = MutexBox<[String]>([])
     fileprivate let cmdSema    = DispatchSemaphore(value: 0)
     /// Replaced on every launch so a prior `terminate()` cannot kill the new worker.
     fileprivate var shouldQuit = AtomicBool()
     private var workerEpoch = 0
     private var previousWorkerExit: DispatchSemaphore?
+    private var connectionString = ""
+    private var loopbackListenFD: Int32 = -1
+    private var loopbackAcceptStop = AtomicBool()
+    private var savedStdoutFD: Int32 = -1
+    private var bleAcceptHook: (@MainActor (Int32) -> Void)?
 
     private(set) var outputStream: AsyncStream<String>
     private var outputContinuation: AsyncStream<String>.Continuation
@@ -185,7 +214,7 @@ final class BinaryRunner: ObservableObject {
                 close(stdoutMaster); close(stdoutSlave); close(fd)
                 throw RunnerError.pipeFailed
             }
-            guard Darwin.listen(fd, 1) == 0 else {
+            guard Darwin.listen(fd, 4) == 0 else {
                 close(stdoutMaster); close(stdoutSlave); close(fd)
                 throw RunnerError.pipeFailed
             }
@@ -223,6 +252,7 @@ final class BinaryRunner: ObservableObject {
         }
 
         let savedStdout = dup(STDOUT_FILENO)
+        self.savedStdoutFD = savedStdout
 
         self.stdoutReadFD  = stdoutMaster
         self.processStatus = remoteTCP == nil ? "Running (libpm3)" : "Running (tcp)"
@@ -237,7 +267,16 @@ final class BinaryRunner: ObservableObject {
         setenv("TERM", "xterm-256color", 1)
         setenv("PM3HOME", pm3Home, 1)
 
+        self.pm3Open = pm3Open
+        self.pm3Close = pm3Close
         self.pm3Console = pm3Console
+        self.pm3ShowBanner = pm3ShowBanner
+        self.pm3VersionShort = pm3VersionShort
+        self.pm3Flash = dlsym(handle, "pm3_flash").map {
+            unsafeBitCast($0, to: PM3FlashFunc.self)
+        }
+        self.connectionString = connectionString
+        self.bleAcceptHook = onLocalAccept
         workerEpoch += 1
         let epoch = workerEpoch
         let quit = AtomicBool()
@@ -246,7 +285,6 @@ final class BinaryRunner: ObservableObject {
         previousWorkerExit = exitSema
         let cmdQueue    = self.cmdQueue
         let cmdSema     = self.cmdSema
-        let acceptHook  = onLocalAccept
         let wrappedExit: @Sendable () -> Void = { [weak self] in
             exitSema.signal()
             Task { @MainActor in
@@ -257,24 +295,34 @@ final class BinaryRunner: ObservableObject {
         }
 
         if let serverFD {
-            // BLE: resume once the loopback accept completes so the session can
-            // attach BLETransport. pm3_open/TestProxmark runs on the C thread.
+            // BLE: keep the listen socket for console → flash → console reconnects.
+            loopbackListenFD = serverFD
+            loopbackAcceptStop.store(false)
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                Thread { [weak self] in
-                    var clientAddr = sockaddr()
-                    var clientAddrLen = socklen_t(MemoryLayout<sockaddr>.size)
-                    let fd = Darwin.accept(serverFD, &clientAddr, &clientAddrLen)
-                    close(serverFD)
-                    Task { @MainActor in
-                        if fd >= 0 {
+                let firstAccept = AtomicBool()
+                let stop = loopbackAcceptStop
+                let acceptThread = Thread { [weak self] in
+                    while stop.load() == false {
+                        var clientAddr = sockaddr()
+                        var clientAddrLen = socklen_t(MemoryLayout<sockaddr>.size)
+                        let fd = Darwin.accept(serverFD, &clientAddr, &clientAddrLen)
+                        guard fd >= 0 else { break }
+                        Task { @MainActor in
+                            if let old = self?.portMasterFD, old >= 0, old != fd {
+                                Darwin.close(old)
+                            }
                             self?.portMasterFD = fd
-                            acceptHook?(fd)
-                            continuation.resume()
-                        } else {
-                            continuation.resume(throwing: RunnerError.pipeFailed)
+                            self?.bleAcceptHook?(fd)
+                            if firstAccept.load() == false {
+                                firstAccept.store(true)
+                                continuation.resume()
+                            }
                         }
                     }
-                }.start()
+                }
+                acceptThread.name = "pm3-ble-accept"
+                acceptThread.qualityOfService = .userInitiated
+                acceptThread.start()
 
                 Self.startPM3Thread(
                     pm3Open: pm3Open,
@@ -325,11 +373,122 @@ final class BinaryRunner: ObservableObject {
         guard let prev = previousWorkerExit else { return }
         previousWorkerExit = nil
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            // Match the pm3 worker QoS so Thread Performance Checker does not
+            // flag a user-initiated wait on a default-QoS thread.
             DispatchQueue.global(qos: .userInitiated).async {
                 prev.wait()
                 continuation.resume()
             }
         }
+    }
+
+    /// Stop the console thread but keep BLE/TCP, loopback, and stdout capture.
+    func pauseConsole() async {
+        shouldQuit.store(true)
+        cmdSema.signal()
+        await waitForPreviousWorker()
+        isRunning = false
+        processStatus = "Paused"
+    }
+
+    /// Flash ARM firmware ELFs over the current connection string.
+    func flash(images: [String], unlockBootloader: Bool, force: Bool = false) async throws {
+        guard !images.isEmpty else { throw RunnerError.flashFailed(Int32(-2)) }
+
+        #if targetEnvironment(simulator)
+        try await flashSimulator(images: images, unlockBootloader: unlockBootloader, force: force)
+        #else
+        guard let pm3Flash else { throw RunnerError.flashUnavailable }
+        let port = connectionString
+        let rc: Int32 = await withCheckedContinuation { continuation in
+            let thread = Thread {
+                let result: Int32 = images.withCStringArray { cStrings in
+                    pm3Flash(port, cStrings, Int32(images.count), unlockBootloader, force)
+                }
+                continuation.resume(returning: result)
+            }
+            thread.name = "pm3-flash"
+            thread.qualityOfService = .userInitiated
+            thread.start()
+        }
+        guard rc == PM3ClientStatus.success else {
+            throw RunnerError.flashFailed(rc)
+        }
+        #endif
+    }
+
+    #if targetEnvironment(simulator)
+    private func flashSimulator(images: [String], unlockBootloader: Bool, force: Bool) async throws {
+        guard let pm3 = SimulatorBoot.pm3BinaryPath(),
+              let port = SimulatorBoot.usbSerialPort() else {
+            throw RunnerError.binaryNotFound
+        }
+        var args = [pm3, port, "--flash"]
+        if unlockBootloader { args.append("--unlock-bootloader") }
+        if force { args.append("--force") }
+        for image in images {
+            args.append("--image")
+            args.append(image)
+        }
+        try await Self.spawnAndWait(args: args)
+    }
+
+    private static func spawnAndWait(args: [String]) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            Thread {
+                var cargs = args.map { strdup($0) }
+                cargs.append(nil)
+                defer { for p in cargs { free(p) } }
+                var pid: pid_t = 0
+                let rc = posix_spawn(&pid, args[0], nil, nil, cargs, environ)
+                guard rc == 0 else {
+                    continuation.resume(throwing: RunnerError.spawnFailed(rc))
+                    return
+                }
+                var status: Int32 = 0
+                waitpid(pid, &status, 0)
+                if status == 0 {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: RunnerError.flashFailed(status))
+                }
+            }.start()
+        }
+    }
+    #endif
+
+    /// Re-open the interactive console on the existing link after a flash.
+    func resumeConsoleAfterFlash() {
+        guard let pm3Open, let pm3Console, let pm3Close else { return }
+        workerEpoch += 1
+        let epoch = workerEpoch
+        let quit = AtomicBool()
+        shouldQuit = quit
+        let exitSema = DispatchSemaphore(value: 0)
+        previousWorkerExit = exitSema
+        let wrappedExit: @Sendable () -> Void = { [weak self] in
+            exitSema.signal()
+            Task { @MainActor in
+                guard let self, self.workerEpoch == epoch else { return }
+                self.isRunning = false
+                self.processStatus = "Exited"
+            }
+        }
+        Self.startPM3Thread(
+            pm3Open: pm3Open,
+            pm3Console: pm3Console,
+            pm3Close: pm3Close,
+            pm3ShowBanner: pm3ShowBanner,
+            pm3VersionShort: pm3VersionShort,
+            connectionString: connectionString,
+            savedStdout: savedStdoutFD,
+            cmdQueue: cmdQueue,
+            cmdSema: cmdSema,
+            shouldQuit: quit,
+            onExit: wrappedExit
+        )
+        isRunning = true
+        processStatus = "Running (libpm3)"
     }
 
     /// C client thread — `pm3_open` / console loop / `pm3_close`.
@@ -388,12 +547,11 @@ final class BinaryRunner: ObservableObject {
             }
             pm3Close(dev)
 
-            close(STDOUT_FILENO)
-            if savedStdout >= 0 { dup2(savedStdout, STDOUT_FILENO); close(savedStdout) }
             onExit()
         }
         thread.name = "pm3-libpm3"
         thread.stackSize = 8 * 1024 * 1024
+        thread.qualityOfService = .userInitiated
         thread.start()
     }
 
@@ -514,12 +672,26 @@ final class BinaryRunner: ObservableObject {
         shouldQuit.store(true)
         cmdSema.signal()
         pm3Console = nil
+        pm3Open = nil
+        pm3Close = nil
+        pm3Flash = nil
+
+        loopbackAcceptStop.store(true)
+        if loopbackListenFD >= 0 {
+            Darwin.close(loopbackListenFD)
+            loopbackListenFD = -1
+        }
 
         isRunning = false
         processStatus = "Stopped"
         if stdoutReadFD >= 0  { close(stdoutReadFD);  stdoutReadFD  = -1 }
         if stdinWriteFD >= 0  { close(stdinWriteFD);  stdinWriteFD  = -1 }
         if portMasterFD >= 0  { close(portMasterFD);  portMasterFD  = -1 }
+        if savedStdoutFD >= 0 {
+            dup2(savedStdoutFD, STDOUT_FILENO)
+            close(savedStdoutFD)
+            savedStdoutFD = -1
+        }
         outputContinuation.finish()
     }
 
@@ -691,6 +863,11 @@ struct OutputLineSplitter {
                 live = true
             } else {
                 partial = String(s)
+                // CSI animations (hadouken) never emit \n/\r; do not let partial grow forever.
+                if partial.count > 4096 {
+                    partial = ""
+                    live = false
+                }
                 break
             }
         }
@@ -717,6 +894,23 @@ struct OutputLineSplitter {
             return String(s[s.index(after: cr)...])
         }
         return String(s)
+    }
+}
+
+extension Array where Element == String {
+    fileprivate func withCStringArray<R>(_ body: (UnsafePointer<UnsafePointer<CChar>?>) -> R) -> R {
+        var cStrings: [UnsafeMutablePointer<CChar>?] = map { strdup($0) }
+        defer {
+            for p in cStrings { free(p) }
+        }
+        return cStrings.withUnsafeBufferPointer { buf in
+            guard let base = buf.baseAddress else {
+                return body(UnsafePointer(bitPattern: 1)!)
+            }
+            return base.withMemoryRebound(to: UnsafePointer<CChar>?.self, capacity: buf.count) { ptr in
+                body(ptr)
+            }
+        }
     }
 }
 

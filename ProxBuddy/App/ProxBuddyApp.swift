@@ -4,7 +4,20 @@ import SwiftUI
 final class AppNavigation: ObservableObject {
     @Published var selectedTab: Int = 0
     @Published var browserPath: [BrowserDestination] = []
+    /// Bumped by `focusTerminal()` so ContentView can re-apply tab selection after
+    /// nested sheets (file picker, device info) finish dismissing.
+    @Published private(set) var terminalFocusSignal = 0
     static let terminalTab = 0
+
+    func focusTerminal() {
+        selectedTab = Self.terminalTab
+        terminalFocusSignal += 1
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            selectedTab = Self.terminalTab
+            terminalFocusSignal += 1
+        }
+    }
 }
 
 @main

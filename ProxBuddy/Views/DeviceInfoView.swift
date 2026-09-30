@@ -1,13 +1,23 @@
 import SwiftUI
+import UniformTypeIdentifiers
+import UIKit
 
 struct DeviceInfoSheet: View {
     @ObservedObject var session: PM3Session
+    var onFlashWillStart: () -> Void = {}
     @Environment(\.dismiss) var dismiss
 
     @State private var isLoading = true
     @State private var error: String?
     @State private var versionReport = DeviceStatReport(sections: [])
     @State private var statusReport = DeviceStatReport(sections: [])
+    @State private var showImporter = false
+    @State private var flashAlert: String?
+    @State private var isFlashing = false
+    @State private var isFetchingRelease = false
+    @State private var releaseEntry: FirmwareReleaseCatalog.Entry?
+    @State private var releaseNotice: String?
+    @State private var unlockBootloader = false
 
     var body: some View {
         NavigationStack {
@@ -32,6 +42,8 @@ struct DeviceInfoSheet: View {
                     connectionCard
                     batteryCard
                     firmwareCard
+
+                    flashCard
 
                     ForEach(statusReport.sections.filter { !isBatterySection($0) }) { section in
                         statSectionCard(section)
@@ -58,6 +70,23 @@ struct DeviceInfoSheet: View {
                 }
             }
             .task { await refreshInfo() }
+            .fileImporter(
+                isPresented: $showImporter,
+                allowedContentTypes: [UTType(filenameExtension: "elf") ?? .data, .data],
+                allowsMultipleSelection: true
+            ) { result in
+                Task { @MainActor in
+                    await handlePickedFirmware(result)
+                }
+            }
+            .alert("Cannot flash", isPresented: Binding(
+                get: { flashAlert != nil },
+                set: { if !$0 { flashAlert = nil } }
+            )) {
+                Button("OK", role: .cancel) { flashAlert = nil }
+            } message: {
+                Text(flashAlert ?? "")
+            }
         }
         .preferredColorScheme(.dark)
     }
@@ -148,6 +177,76 @@ struct DeviceInfoSheet: View {
         .liquidGlassCard()
     }
 
+    private var flashCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("DEVICE FIRMWARE").hackerText().font(.caption).opacity(0.8)
+            if let entry = releaseEntry {
+                Text("Hosted release \(entry.releaseTag) matches this app’s pm3 client. Flash over Wi-Fi from GitHub, or pick local .elf files.")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Pick fullimage.elf and it flashes over Wi-Fi. Select bootrom.elf too to update both at once.")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            if let notice = releaseNotice {
+                Text(notice)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            if let reason = session.flashBlockedReason {
+                Text(reason)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.yellow)
+            }
+
+            Toggle(isOn: $unlockBootloader) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Allow bootrom writes")
+                        .font(.system(.caption, design: .monospaced))
+                    Text("Same as --unlock-bootloader. A failed bootrom write needs a computer (USB + Artery ISP) to recover.")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .tint(.hackerGreen)
+            .disabled(isFlashing || isFetchingRelease)
+            if releaseEntry != nil {
+                Button {
+                    Task { await flashMatchingRelease() }
+                } label: {
+                    Label(flashReleaseLabel, systemImage: "arrow.down.circle")
+                        .font(.system(.subheadline, design: .monospaced))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.hackerGreen)
+                .disabled(flashControlsDisabled)
+            }
+            Button {
+                showImporter = true
+            } label: {
+                Label(isFlashing ? "Flashing…" : "Flash from files…", systemImage: "sdcard")
+                    .font(.system(.subheadline, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(.hackerGreen)
+            .disabled(flashControlsDisabled)
+        }
+        .liquidGlassCard()
+        .task { await refreshReleaseOffer() }
+    }
+
+    private var flashReleaseLabel: String {
+        if isFlashing || isFetchingRelease { return "Preparing firmware…" }
+        return unlockBootloader ? "Flash matching release (OS + bootrom)" : "Flash matching release"
+    }
+
+    private var flashControlsDisabled: Bool {
+        isFlashing || isFetchingRelease || !session.isRunning || session.flashBlockedReason != nil
+    }
+
     private func statSectionCard(_ section: DeviceStatSection) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(section.title.uppercased()).hackerText().font(.caption).opacity(0.8)
@@ -204,5 +303,86 @@ struct DeviceInfoSheet: View {
             session.noteGaugeSoC(soc)
         }
         isLoading = false
+    }
+
+    private func refreshReleaseOffer() async {
+        releaseEntry = nil
+        releaseNotice = nil
+        guard let client = PM3ClientVersion.bundledInfo?.gitVersion else {
+            releaseNotice = "Could not read bundled pm3 client version."
+            return
+        }
+        do {
+            let manifest = try await FirmwareReleaseCatalog.loadManifest()
+            releaseEntry = FirmwareReleaseCatalog.matchingEntry(in: manifest, clientGitVersion: client)
+            if releaseEntry == nil {
+                releaseNotice = "No GitHub release for \(client) yet. Build ELFs at the same commit or wait for a ProxBuddy firmware release."
+            }
+        } catch {
+            releaseNotice = error.localizedDescription
+        }
+    }
+
+    private func flashMatchingRelease() async {
+        guard let entry = releaseEntry else { return }
+        isFetchingRelease = true
+        defer { isFetchingRelease = false }
+        do {
+            session.engine.append(raw: "[=] fetching firmware \(entry.releaseTag)", isInput: false)
+            let urls = try await FirmwareReleaseCatalog.prepareArtifacts(
+                for: entry,
+                includeBootrom: unlockBootloader
+            )
+            let names = urls.map(\.lastPathComponent).joined(separator: ", ")
+            session.engine.append(raw: "[=] verified \(names)", isInput: false)
+            try? await Task.sleep(for: .milliseconds(400))
+            await runFlash(urls: urls)
+        } catch {
+            session.engine.append(raw: "[!] firmware release: \(error.localizedDescription)", isInput: false)
+            try? await Task.sleep(for: .milliseconds(400))
+            flashAlert = error.localizedDescription
+        }
+    }
+
+    private func handlePickedFirmware(_ result: Result<[URL], Error>) async {
+        switch result {
+        case .success(let urls):
+            let staged: [URL]
+            do {
+                staged = try FirmwareImages.stage(urls)
+            } catch {
+                session.engine.append(raw: "[!] flash: \(error.localizedDescription)", isInput: false)
+                try? await Task.sleep(for: .milliseconds(400))
+                flashAlert = error.localizedDescription
+                return
+            }
+            let names = staged.map(\.lastPathComponent).joined(separator: ", ")
+            session.engine.append(raw: "[=] queued \(names)", isInput: false)
+            try? await Task.sleep(for: .milliseconds(400))
+            // Caught here only to give a clearer message than the client's segment
+            // check; the client decides for real from the ELF's PHDR addresses.
+            if unlockBootloader == false, staged.contains(where: FirmwareImages.looksLikeBootrom) {
+                flashAlert = "That looks like a bootrom image. Turn on \"Allow bootrom writes\" first, then flash again."
+                return
+            }
+            await runFlash(urls: staged)
+        case .failure(let err):
+            session.engine.append(raw: "[!] flash picker: \(err.localizedDescription)", isInput: false)
+            try? await Task.sleep(for: .milliseconds(400))
+            flashAlert = err.localizedDescription
+        }
+    }
+
+    private func runFlash(urls: [URL]) async {
+        guard !urls.isEmpty else { return }
+        onFlashWillStart()
+        isFlashing = true
+        UIApplication.shared.isIdleTimerDisabled = true
+        defer {
+            UIApplication.shared.isIdleTimerDisabled = false
+            isFlashing = false
+        }
+        await session.flashFirmware(imageURLs: urls, unlockBootloader: unlockBootloader)
+        await refreshInfo()
     }
 }

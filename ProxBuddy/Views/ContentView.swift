@@ -83,6 +83,11 @@ struct ContentView: View {
         }
         .tint(.hackerGreen)
         .preferredColorScheme(.dark)
+        .onChange(of: appNav.terminalFocusSignal) { _, _ in
+            withAnimation(.easeInOut(duration: 0.2)) {
+                appNav.selectedTab = AppNavigation.terminalTab
+            }
+        }
     }
 
     // MARK: - Terminal tab (iPad split / iPhone single)

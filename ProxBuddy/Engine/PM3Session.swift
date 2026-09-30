@@ -342,4 +342,67 @@ final class PM3Session: ObservableObject, Identifiable {
         bleTransport.disconnect()
         #endif
     }
+
+    /// Why flashing is refused right now, or nil if it can proceed.
+    ///
+    /// Wi-Fi only, deliberately. Over BLE the bootrom answers but loses bytes
+    /// part-way through the transfer, and a short write leaves an OS that will not
+    /// boot — recoverable only over USB. Wi-Fi gives libpm3 a real `tcp:host:port`
+    /// stream, which is the path that flashes reliably.
+    var flashBlockedReason: String? {
+        #if targetEnvironment(simulator)
+        return nil   // simulator flashes a USB Proxmark via the host binary
+        #else
+        guard let endpoint = wifiEndpoint else {
+            return "Flashing needs Wi-Fi. In Connection, pick Wi-Fi and use \"Join network\" to put the BWM on your network."
+        }
+        guard selectedTransportMode == .wifi, runner.isOnTCP else {
+            return "Flashing needs Wi-Fi. In Connection, pick Wi-Fi and tap \"Switch to Wi-Fi\" to reconnect on \(endpoint)."
+        }
+        return nil
+        #endif
+    }
+
+    /// `tcp:host:port` for the current Wi-Fi settings, or nil if no host is set.
+    var wifiEndpoint: String? {
+        let host = wifiHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        return host.isEmpty ? nil : "tcp:\(host):\(wifiPort)"
+    }
+
+    /// Pause the console, flash ARM ELFs over the current link, then reopen the console.
+    func flashFirmware(imageURLs: [URL], unlockBootloader: Bool) async {
+        guard isRunning || runner.processStatus == "Paused" else {
+            engine.append(raw: "[!] flash: connect to the device first", isInput: false)
+            return
+        }
+        // Backstop for the disabled button: never start a transfer on a link that
+        // can truncate it.
+        if let reason = flashBlockedReason {
+            engine.append(raw: "[!] flash: \(reason)", isInput: false)
+            return
+        }
+        let staged: [URL]
+        do {
+            staged = try FirmwareImages.stage(imageURLs)
+        } catch {
+            engine.append(raw: "[!] flash: could not copy images — \(error.localizedDescription)", isInput: false)
+            return
+        }
+        let names = staged.map(\.lastPathComponent).joined(separator: ", ")
+        engine.append(raw: "[=] flashing \(names)\(unlockBootloader ? " (bootrom unlocked)" : "")", isInput: false)
+
+        await runner.pauseConsole()
+        do {
+            try await runner.flash(
+                images: staged.map { $0.path(percentEncoded: false) },
+                unlockBootloader: unlockBootloader
+            )
+            engine.append(raw: "[+] flash finished — reconnecting client", isInput: false)
+        } catch {
+            engine.append(raw: "[!] flash: \(error.localizedDescription)", isInput: false)
+            engine.append(raw: "[=] leave the device in bootrom (B+D on) and retry. Do not short-press into a half-written OS.", isInput: false)
+        }
+        try? await Task.sleep(for: .seconds(2))
+        runner.resumeConsoleAfterFlash()
+    }
 }

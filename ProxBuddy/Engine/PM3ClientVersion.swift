@@ -29,6 +29,21 @@ enum PM3ClientVersion {
         return parse(from: data)
     }
 
+    /// Commit hash from mkversion strings, e.g. `…-g83c3f81b1` → `83c3f81b1`.
+    static func commitHash(from gitVersion: String) -> String? {
+        if let range = gitVersion.range(of: "-g", options: .backwards) {
+            let hash = String(gitVersion[range.upperBound...])
+            if hash.count >= 7, hash.allSatisfy(\.isHexDigit) {
+                return hash.lowercased()
+            }
+        }
+        let tail = gitVersion.split(separator: "/").last.map(String.init) ?? ""
+        if (7...40).contains(tail.count), tail.allSatisfy(\.isHexDigit) {
+            return tail.lowercased()
+        }
+        return nil
+    }
+
     static func bundledDylibURL() -> URL? {
         let candidates: [URL?] = [
             Bundle.main.privateFrameworksURL?

@@ -34,6 +34,7 @@ final class BLETransport: NSObject, ObservableObject {
 
     private var portFD: Int32 = -1
     private let portWriteQueue = DispatchQueue(label: "com.proxbuddy.ble.port", qos: .userInteractive)
+    private var bleOutbox = Data()
     private var pendingDiscoveries: [UUID: DiscoveredPeripheral] = [:]
     private var discoveryFlushWork: DispatchWorkItem?
     private static let rssiBucket = 5
@@ -72,30 +73,65 @@ final class BLETransport: NSObject, ObservableObject {
 
     /// pm3 engine wrote bytes -> send out over BLE to PM5
     private func writeToBLE(data: Data) {
-        guard let peripheral = connectedPeripheral, connectionState == .ready else { return }
+        guard !data.isEmpty else { return }
+        bleOutbox.append(data)
+        pumpBLEOutbox()
+    }
 
+    /// Honor CoreBluetooth's without-response credit. Firing every chunk at once
+    /// silently drops ATT writes after a burst (flash IAP dies around ~15 blocks).
+    private func pumpBLEOutbox() {
+        guard connectionState == .ready, let peripheral = connectedPeripheral else { return }
         let targetChar = dataCharacteristic ?? nusRxCharacteristic
         guard let char = targetChar else { return }
 
+        let withoutResponse = char.properties.contains(.writeWithoutResponse)
         let chunkSize = max(1, negotiatedMTU - 3)
-        var offset = 0
-        while offset < data.count {
-            let end = min(offset + chunkSize, data.count)
-            let chunk = data[offset..<end]
-            let writeType: CBCharacteristicWriteType = char.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
-            peripheral.writeValue(chunk, for: char, type: writeType)
-            offset = end
+
+        while bleOutbox.isEmpty == false {
+            if withoutResponse && peripheral.canSendWriteWithoutResponse == false {
+                return
+            }
+            let n = min(chunkSize, bleOutbox.count)
+            let chunk = bleOutbox.prefix(n)
+            peripheral.writeValue(
+                Data(chunk),
+                for: char,
+                type: withoutResponse ? .withoutResponse : .withResponse
+            )
+            bleOutbox.removeSubrange(..<bleOutbox.index(bleOutbox.startIndex, offsetBy: n))
+            if withoutResponse == false {
+                return
+            }
         }
     }
 
-    /// PM5 sent data via BLE notification -> write to pm3 engine socket
+    /// Relay verbatim. The loopback socket is a byte stream and the pm3 client
+    /// frames the stream itself, so re-framing here only added a way to get it
+    /// wrong: it had to assume every non-NG frame was exactly 544 bytes, and one
+    /// lost byte then offset the window for the rest of the session.
     private func receivedFromBLE(_ data: Data) {
         let fd = portFD
-        guard fd >= 0 else { return }
+        guard fd >= 0, data.isEmpty == false else { return }
         portWriteQueue.async {
-            data.withUnsafeBytes { ptr in
-                guard let base = ptr.baseAddress else { return }
-                _ = write(fd, base, data.count)
+            Self.writeAll(fd: fd, data)
+        }
+    }
+
+    // Runs on portWriteQueue, so it must not inherit the class's MainActor isolation.
+    nonisolated private static func writeAll(fd: Int32, _ data: Data) {
+        data.withUnsafeBytes { ptr in
+            guard let base = ptr.baseAddress else { return }
+            var sent = 0
+            while sent < data.count {
+                let n = write(fd, base.advanced(by: sent), data.count - sent)
+                if n > 0 {
+                    sent += n
+                } else if n < 0 && (errno == EINTR || errno == EAGAIN) {
+                    continue
+                } else {
+                    return
+                }
             }
         }
     }
@@ -265,6 +301,7 @@ extension BLETransport: CBCentralManagerDelegate {
             batteryCharacteristic = nil
             batteryLevel = nil
             negotiatedMTU = 20
+            bleOutbox.removeAll()
             _ = connectionContinuation.yield(.disconnected)
         }
     }
@@ -343,5 +380,17 @@ extension BLETransport: CBPeripheralDelegate {
                     }
                 }
             }
+    }
+
+    nonisolated func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        MainActor.assumeIsolated { pumpBLEOutbox() }
+    }
+
+    nonisolated func peripheral(
+        _ peripheral: CBPeripheral,
+        didWriteValueFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        MainActor.assumeIsolated { pumpBLEOutbox() }
     }
 }

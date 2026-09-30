@@ -11,16 +11,11 @@ Public beta: [https://testflight.apple.com/join/vwP8HPkv](https://testflight.app
 
 The app ships a specific Iceman client build. Flash the PM5 to the same commit or commands can disagree with firmware.
 
-1. In the app: **Settings → About**. The `pm3client` line looks like `Iceman/master/v4.21611-1177-g83c3f81b1`.
-2. The `g…` suffix is the git commit (`g83c3f81b1` → `83c3f81b1`).
-3. In your [Iceman proxmark3](https://github.com/RfidResearchGroup/proxmark3) clone:
+**In the app:** **Devices → Device Specs & Hardware Info → Flash matching release** downloads `fullimage.elf` (and optionally `bootrom.elf`) from the ProxBuddy GitHub Release that matches the bundled `pm3client` version. The index is `firmware/manifest.json` on `main`, published by `scripts/publish_firmware_release.sh`.
 
-```bash
-git fetch
-git checkout 83c3f81b1   # hash from About, without the leading g
-```
+**1.1** adds Wi-Fi device flashing — publish matching PM5 firmware on GitHub first, then the IPA. Full runbook: [docs/firmware-release-testing.md](docs/firmware-release-testing.md).
 
-Then build and flash the PM5 the usual Iceman way.
+**Manual / dev:** **Settings → About** shows the client line (e.g. `Iceman/master/v4.21611-1177-g83c3f81b1`). The `g…` suffix is the git commit (`g83c3f81b1` → `83c3f81b1`). Check out that commit in [Iceman proxmark3](https://github.com/RfidResearchGroup/proxmark3), build PM5 ELFs, and use **Flash from files…** until a matching release exists.
 
 ## Key Features
 

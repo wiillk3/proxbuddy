@@ -1,9 +1,9 @@
 --- a/client/src/pm3.c
 +++ b/client/src/pm3.c
-@@ -27,8 +27,17 @@
- #include "util_posix.h"
+@@ -28,8 +28,17 @@
  #include "comms.h"
  #include "preferences.h"
+ #include "flash.h"
 +#include "pm3_ios_exit.h"
  
  pm3_device_t *pm3_open(const char *port) {
@@ -18,7 +18,7 @@
      pm3_init();
      preferences_load();
      OpenProxmark(&g_session.current_device, port, false, 20, false, USART_BAUD_RATE);
-@@ -37,17 +46,26 @@
+@@ -38,17 +47,26 @@
          CloseProxmark(g_session.current_device);
      }
  
@@ -47,7 +47,7 @@
      // Clean up the port
      if (g_session.pm3_present) {
          clearCommandBuffer();
-@@ -56,6 +74,7 @@
+@@ -57,6 +75,7 @@
          CloseProxmark(dev);
      }
      free_grabber();
@@ -55,7 +55,7 @@
  }
  
  int pm3_console(pm3_device_t *dev, const char *cmd, bool capture, bool quiet) {
-@@ -68,7 +87,14 @@
+@@ -69,7 +88,14 @@
      if (quiet) {
          g_printAndLog &= ~PRINTANDLOG_PRINT;
      }
@@ -70,3 +70,34 @@
      g_printAndLog = prev_printAndLog;
      return ret;
  }
+@@ -108,9 +134,17 @@
+         files[i] = images[i];
+     }
+ 
++    if (setjmp(pm3_ios_exit_jmp)) {
++        pm3_ios_exit_armed = 0;
++        return PM3_EFATAL;
++    }
++    pm3_ios_exit_armed = 1;
++
+     // Don't send CMD_QUIT_SESSION — we're about to reset into bootrom.
+     if (g_session.pm3_present) {
+         CloseProxmark(g_session.current_device);
+     }
+-    return flash_pm3((char *)port, (uint8_t)nimages, files, unlock_bootloader, force);
++    int rc = flash_pm3((char *)port, (uint8_t)nimages, files, unlock_bootloader, force);
++    pm3_ios_exit_armed = 0;
++    return rc;
+ }
+--- a/client/src/comms.c
++++ b/client/src/comms.c
+@@ -971,7 +971,8 @@
+         int res;
+         if (g_conn.send_via_local_ip) {
+             // (g_conn.send_via_local_ip == true) -> ((is_tcp_conn || is_udp_conn) == true)
+-            res = uart_reconfigure_timeouts(is_tcp_conn ? UART_TCP_LOCAL_CLIENT_RX_TIMEOUT_MS : UART_UDP_LOCAL_CLIENT_RX_TIMEOUT_MS);
++            // ProxBuddy BLE loopback: 40 ms is inside ATT notification jitter.
++            res = uart_reconfigure_timeouts(is_tcp_conn ? UART_NET_CLIENT_RX_TIMEOUT_MS : UART_UDP_LOCAL_CLIENT_RX_TIMEOUT_MS);
+         } else if (is_tcp_conn || is_udp_conn) {
+             res = uart_reconfigure_timeouts(UART_NET_CLIENT_RX_TIMEOUT_MS);
+         } else {

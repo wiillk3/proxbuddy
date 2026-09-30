@@ -61,4 +61,11 @@ struct OutputLineSplitterTests {
         var s = OutputLineSplitter()
         #expect(s.push("foo\rbar\n") == ["bar"])
     }
+
+    @Test func dropsUnboundedChunkWithNoDelimiter() {
+        var s = OutputLineSplitter()
+        let blob = String(repeating: "A", count: 5000)
+        #expect(s.push(blob).isEmpty)
+        #expect(s.push("ok\n") == ["ok"])
+    }
 }

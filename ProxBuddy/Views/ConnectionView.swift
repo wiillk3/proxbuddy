@@ -44,7 +44,14 @@ struct DevicesView: View {
             .navigationBarTitleDisplayMode(.large)
         }
         .sheet(item: $showingInfoSession) { sess in
-            DeviceInfoSheet(session: sess)
+            DeviceInfoSheet(
+                session: sess,
+                onFlashWillStart: {
+                    deviceManager.setActive(sess)
+                    showingInfoSession = nil
+                    appNav.focusTerminal()
+                }
+            )
         }
         .preferredColorScheme(.dark)
     }
@@ -553,9 +560,7 @@ private struct WiFiSection: View {
         }
     }
 
-    private var onTCP: Bool {
-        session.runner.isRunning && session.runner.portMasterFD < 0
-    }
+    private var onTCP: Bool { session.runner.isOnTCP }
 
     private var portBinding: Binding<String> {
         Binding(

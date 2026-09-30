@@ -61,6 +61,9 @@ ProxBuddy/libpm3client.dylib
 *.json
 # App icon catalog — Contents.json would otherwise match *.json
 !ProxBuddy/Assets.xcassets/**/*.json
+# Hosted PM5 firmware index (updated by local publish_firmware_release.sh)
+!firmware/manifest.json
+scripts/publish_firmware_release.sh
 *.eml
 *.bin
 
