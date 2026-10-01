@@ -84,9 +84,40 @@ struct ContentView: View {
         .tint(.hackerGreen)
         .preferredColorScheme(.dark)
         .onChange(of: appNav.terminalFocusSignal) { _, _ in
-            withAnimation(.easeInOut(duration: 0.2)) {
-                appNav.selectedTab = AppNavigation.terminalTab
+            appNav.selectedTab = AppNavigation.terminalTab
+        }
+        .onChange(of: appNav.hostedFlashSignal) { _, _ in
+            guard let request = appNav.takePendingHostedFlash() else { return }
+            Task { @MainActor in
+                await afterDeviceInfoDismiss(focusTerminal: true) {
+                    guard let session = deviceManager.sessions.first(where: { $0.id == request.sessionID }) else {
+                        return
+                    }
+                    await DeviceFlashCoordinator.flashHostedRelease(
+                        session: session,
+                        entry: request.entry,
+                        unlockBootloader: request.unlockBootloader
+                    )
+                }
             }
+        }
+        .onChange(of: appNav.focusTerminalAfterDeviceInfo) { _, needed in
+            guard needed else { return }
+            appNav.focusTerminalAfterDeviceInfo = false
+            Task { @MainActor in
+                await afterDeviceInfoDismiss(focusTerminal: true)
+            }
+        }
+    }
+
+    /// Device Info is presented from the Devices tab; only ContentView can switch tabs reliably on iPhone.
+    private func afterDeviceInfoDismiss(focusTerminal: Bool, work: (() async -> Void)? = nil) async {
+        try? await Task.sleep(for: .milliseconds(650))
+        if focusTerminal {
+            appNav.focusTerminalAfterSheetDismissal()
+        }
+        if let work {
+            await work()
         }
     }
 

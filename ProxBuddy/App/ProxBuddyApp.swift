@@ -1,5 +1,11 @@
 import SwiftUI
 
+struct HostedFlashRequest: Equatable {
+    let sessionID: UUID
+    let entry: FirmwareReleaseCatalog.Entry
+    let unlockBootloader: Bool
+}
+
 @MainActor
 final class AppNavigation: ObservableObject {
     @Published var selectedTab: Int = 0
@@ -7,15 +13,37 @@ final class AppNavigation: ObservableObject {
     /// Bumped by `focusTerminal()` so ContentView can re-apply tab selection after
     /// nested sheets (file picker, device info) finish dismissing.
     @Published private(set) var terminalFocusSignal = 0
+    /// Devices tab queues hosted flash here; ContentView (TabView owner) runs it.
+    @Published private(set) var hostedFlashSignal = 0
+    @Published var focusTerminalAfterDeviceInfo = false
+    private(set) var pendingHostedFlash: HostedFlashRequest?
     static let terminalTab = 0
+
+    func queueHostedFlash(_ request: HostedFlashRequest) {
+        pendingHostedFlash = request
+        hostedFlashSignal += 1
+    }
+
+    func takePendingHostedFlash() -> HostedFlashRequest? {
+        let request = pendingHostedFlash
+        pendingHostedFlash = nil
+        return request
+    }
 
     func focusTerminal() {
         selectedTab = Self.terminalTab
         terminalFocusSignal += 1
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(400))
-            selectedTab = Self.terminalTab
-            terminalFocusSignal += 1
+    }
+
+    /// TabView lives in ContentView — call from there after device-info sheet is gone.
+    func focusTerminalAfterSheetDismissal() {
+        focusTerminal()
+        for delayMs in [200, 450, 750] {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(delayMs))
+                selectedTab = Self.terminalTab
+                terminalFocusSignal += 1
+            }
         }
     }
 }

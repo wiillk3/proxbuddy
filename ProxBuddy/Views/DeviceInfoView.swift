@@ -5,6 +5,8 @@ import UIKit
 struct DeviceInfoSheet: View {
     @ObservedObject var session: PM3Session
     var onFlashWillStart: () -> Void = {}
+    /// Parent owns the async work so sheet dismissal cannot cancel the download.
+    var onHostedFlash: (FirmwareReleaseCatalog.Entry, Bool) -> Void = { _, _ in }
     @Environment(\.dismiss) var dismiss
 
     @State private var isLoading = true
@@ -14,7 +16,6 @@ struct DeviceInfoSheet: View {
     @State private var showImporter = false
     @State private var flashAlert: String?
     @State private var isFlashing = false
-    @State private var isFetchingRelease = false
     @State private var releaseEntry: FirmwareReleaseCatalog.Entry?
     @State private var releaseNotice: String?
     @State private var unlockBootloader = false
@@ -210,10 +211,11 @@ struct DeviceInfoSheet: View {
                 }
             }
             .tint(.hackerGreen)
-            .disabled(isFlashing || isFetchingRelease)
+            .disabled(isFlashing)
             if releaseEntry != nil {
                 Button {
-                    Task { await flashMatchingRelease() }
+                    guard let entry = releaseEntry else { return }
+                    onHostedFlash(entry, unlockBootloader)
                 } label: {
                     Label(flashReleaseLabel, systemImage: "arrow.down.circle")
                         .font(.system(.subheadline, design: .monospaced))
@@ -239,12 +241,11 @@ struct DeviceInfoSheet: View {
     }
 
     private var flashReleaseLabel: String {
-        if isFlashing || isFetchingRelease { return "Preparing firmware…" }
-        return unlockBootloader ? "Flash matching release (OS + bootrom)" : "Flash matching release"
+        unlockBootloader ? "Flash matching release (OS + bootrom)" : "Flash matching release"
     }
 
     private var flashControlsDisabled: Bool {
-        isFlashing || isFetchingRelease || !session.isRunning || session.flashBlockedReason != nil
+        isFlashing || !session.isRunning || session.flashBlockedReason != nil
     }
 
     private func statSectionCard(_ section: DeviceStatSection) -> some View {
@@ -323,27 +324,6 @@ struct DeviceInfoSheet: View {
         }
     }
 
-    private func flashMatchingRelease() async {
-        guard let entry = releaseEntry else { return }
-        isFetchingRelease = true
-        defer { isFetchingRelease = false }
-        do {
-            session.engine.append(raw: "[=] fetching firmware \(entry.releaseTag)", isInput: false)
-            let urls = try await FirmwareReleaseCatalog.prepareArtifacts(
-                for: entry,
-                includeBootrom: unlockBootloader
-            )
-            let names = urls.map(\.lastPathComponent).joined(separator: ", ")
-            session.engine.append(raw: "[=] verified \(names)", isInput: false)
-            try? await Task.sleep(for: .milliseconds(400))
-            await runFlash(urls: urls)
-        } catch {
-            session.engine.append(raw: "[!] firmware release: \(error.localizedDescription)", isInput: false)
-            try? await Task.sleep(for: .milliseconds(400))
-            flashAlert = error.localizedDescription
-        }
-    }
-
     private func handlePickedFirmware(_ result: Result<[URL], Error>) async {
         switch result {
         case .success(let urls):
@@ -377,12 +357,48 @@ struct DeviceInfoSheet: View {
         guard !urls.isEmpty else { return }
         onFlashWillStart()
         isFlashing = true
-        UIApplication.shared.isIdleTimerDisabled = true
-        defer {
-            UIApplication.shared.isIdleTimerDisabled = false
-            isFlashing = false
-        }
-        await session.flashFirmware(imageURLs: urls, unlockBootloader: unlockBootloader)
+        defer { isFlashing = false }
+        await DeviceFlashCoordinator.flashLocal(
+            session: session,
+            urls: urls,
+            unlockBootloader: unlockBootloader
+        )
         await refreshInfo()
+    }
+}
+
+/// Flash orchestration owned outside DeviceInfoSheet so hosted downloads survive sheet dismiss.
+enum DeviceFlashCoordinator {
+    @MainActor
+    static func flashHostedRelease(
+        session: PM3Session,
+        entry: FirmwareReleaseCatalog.Entry,
+        unlockBootloader: Bool
+    ) async {
+        do {
+            session.engine.append(raw: "[=] fetching firmware \(entry.releaseTag)", isInput: false)
+            let urls = try await FirmwareReleaseCatalog.prepareArtifacts(
+                for: entry,
+                includeBootrom: unlockBootloader
+            )
+            let names = urls.map(\.lastPathComponent).joined(separator: ", ")
+            session.engine.append(raw: "[=] verified \(names)", isInput: false)
+            try? await Task.sleep(for: .milliseconds(400))
+            await flashLocal(session: session, urls: urls, unlockBootloader: unlockBootloader)
+        } catch {
+            session.engine.append(raw: "[!] firmware release: \(error.localizedDescription)", isInput: false)
+        }
+    }
+
+    @MainActor
+    static func flashLocal(
+        session: PM3Session,
+        urls: [URL],
+        unlockBootloader: Bool
+    ) async {
+        guard !urls.isEmpty else { return }
+        UIApplication.shared.isIdleTimerDisabled = true
+        defer { UIApplication.shared.isIdleTimerDisabled = false }
+        await session.flashFirmware(imageURLs: urls, unlockBootloader: unlockBootloader)
     }
 }

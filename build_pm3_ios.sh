@@ -79,10 +79,18 @@ PM3_SRC="$(cd "$PM3_SRC" && pwd)"
 # Ensure we always restore the upstream CMakeLists.txt even if the script fails
 cleanup() {
     if [ -d "$PM3_SRC/.git" ]; then
-        # Reverse iOS-only hunks first. Do not `checkout` proxmark3.c — that
+        # Unapply in reverse order. Do not `checkout` proxmark3.c — that
         # restores a static flash_pm3 that collides with flash.h.
         git -C "$PM3_SRC" apply -R "$SCRIPT_DIR/patches/ios-pm3-startup-banner.patch" 2>/dev/null || true
-        git -C "$PM3_SRC" checkout -- client/CMakeLists.txt client/src/pm3.c client/src/cmdscript.c client/include/pm3.h 2>/dev/null || true
+        git -C "$PM3_SRC" apply -R "$SCRIPT_DIR/patches/ios-pm3-python-no-os-exit.patch" 2>/dev/null || true
+        git -C "$PM3_SRC" apply -R "$SCRIPT_DIR/patches/ios-pm3-no-process-exit.patch" 2>/dev/null || true
+        git -C "$PM3_SRC" checkout -- \
+            client/CMakeLists.txt \
+            client/src/pm3.c \
+            client/src/comms.c \
+            client/src/cmdscript.c \
+            client/include/pm3.h \
+            2>/dev/null || true
     fi
 }
 trap cleanup EXIT

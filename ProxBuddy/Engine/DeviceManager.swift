@@ -30,7 +30,8 @@ final class DeviceManager: ObservableObject {
     }
 
     func setActive(_ session: PM3Session) {
-        if let idx = sessions.firstIndex(where: { $0.id == session.id }) {
+        if let idx = sessions.firstIndex(where: { $0.id == session.id }),
+           activeIndex != idx {
             activeIndex = idx
         }
     }

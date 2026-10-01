@@ -94,3 +94,4 @@ ProxBuddy/AIContexts/
 ProxBuddy/Python.xcframework/
 ProxBuddy/Resources/python311.zip
 ProxBuddy/Resources/python313.zip
+docs/ble-flashing-plan.md

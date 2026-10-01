@@ -47,13 +47,26 @@ struct DevicesView: View {
             DeviceInfoSheet(
                 session: sess,
                 onFlashWillStart: {
+                    dismissDeviceInfoForLocalFlash(session: sess)
+                },
+                onHostedFlash: { entry, unlockBootloader in
+                    appNav.queueHostedFlash(HostedFlashRequest(
+                        sessionID: sess.id,
+                        entry: entry,
+                        unlockBootloader: unlockBootloader
+                    ))
                     deviceManager.setActive(sess)
                     showingInfoSession = nil
-                    appNav.focusTerminal()
                 }
             )
         }
         .preferredColorScheme(.dark)
+    }
+
+    private func dismissDeviceInfoForLocalFlash(session: PM3Session) {
+        deviceManager.setActive(session)
+        appNav.focusTerminalAfterDeviceInfo = true
+        showingInfoSession = nil
     }
 }
 
